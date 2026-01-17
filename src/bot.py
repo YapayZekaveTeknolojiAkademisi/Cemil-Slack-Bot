@@ -334,9 +334,12 @@ def handle_reindex_command(ack, body):
 # --- 5. Kullanıcı Kaydı ---
 @app.command("/kayit")
 def handle_register_command(ack, body):
-    """Kullanıcı kaydı oluşturur/günceller."""
+    """
+    Kullanıcı kaydı oluşturur/günceller.
+    GÜVENLİK: Kullanıcı sadece kendi Slack ID'si ile eşleşen kaydı güncelleyebilir.
+    """
     ack()
-    user_id = body["user_id"]
+    user_id = body["user_id"]  # Slack tarafından otomatik sağlanan, güvenilir ID
     channel_id = body["channel_id"]
     text = body.get("text", "").strip()
     
@@ -356,7 +359,8 @@ def handle_register_command(ack, body):
     birthday = parts[3]
     
     try:
-        # Kullanıcıyı veritabanına ekle/güncelle
+        # GÜVENLİK: user_id Slack'ten geldiği için güvenilir
+        # Kullanıcı sadece kendi kaydını güncelleyebilir
         existing = user_repo.get_by_slack_id(user_id)
         if existing:
             user_repo.update_by_slack_id(user_id, {
@@ -377,7 +381,7 @@ def handle_register_command(ack, body):
         chat_manager.post_ephemeral(
             channel=channel_id,
             user=user_id,
-            text=f"✅ Kaydınız güncellendi!\n*Ad Soyad:* {first_name} {surname}\n*Doğum Tarihi:* {birthday}"
+            text=f"✅ Kaydınız güncellendi!\n*Ad Soyad:* {first_name} {surname}\n*Departman:* {department}\n*Doğum Tarihi:* {birthday}"
         )
         logger.info(f"[+] Kullanıcı kaydı: {first_name} {surname} ({user_id})")
         
