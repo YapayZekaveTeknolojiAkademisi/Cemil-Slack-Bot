@@ -492,18 +492,18 @@ if __name__ == "__main__":
     # Başlangıç mesajı (isteğe bağlı)
     # Başlangıç mesajı (isteğe bağlı)
     startup_channel = os.environ.get("SLACK_STARTUP_CHANNEL")
-    github_repo = os.environ.get("GITHUB_REPO", "https://github.com/SİZİN_KULLANICI_ADINIZ/cemil-bot")
+    github_repo = os.environ.get("GITHUB_REPO")
     
     if startup_channel:
         try:
             startup_text = (
-                "Merhabalar! Ben Cemil, yeni uyandım ve görevimin başındayım. ☀️\n\n"
-                "Topluluk etkileşimini artırmak için buradayım! İşte yapabileceklerim:\n"
-                "• `/kahve` - Rastgele bir çalışma arkadaşınla eşleş ☕\n"
-                "• `/oylama` - Hızlı anketler başlat (Admin) 🗳️\n"
-                "• `/geri-bildirim` - Anonim geri bildirim gönder 📝\n"
-                "• `/sor` - Bilgi küpümden soru sor 🔍\n"
-                "• `/kayit` - Profilini güncelle 👤\n\n"
+                "👋 *Merhabalar! Ben Cemil, göreve hazırım!* ☀️\n\n"
+                "Topluluk etkileşimini artırmak için buradayım. İşte güncel yeteneklerim:\n\n"
+                "☕ *`/kahve`* - Kahve molası eşleşmesi için havuza katıl.\n"
+                "🗳️ *`/oylama`* - Hızlı anketler başlat (Admin).\n"
+                "📝 *`/geri-bildirim`* - Yönetime anonim mesaj gönder.\n"
+                "🧠 *`/sor`* - Dökümanlara ve bilgi küpüne soru sor.\n"
+                "👤 *`/kayit`* - Kullanıcı profilini oluştur veya güncelle.\n\n"
                 "Güzel bir gün dilerim! ✨"
             )
             
