@@ -66,32 +66,56 @@ class VectorClient(metaclass=SingletonMeta):
         query_embedding = self.model.encode([query])
         query_embedding = np.array(query_embedding).astype('float32')
 
-        # Daha fazla sonuç al, sonra filtrele (top_k * 4 ile daha geniş arama)
-        search_k = min(top_k * 4, len(self.documents)) if self.documents else top_k
+        # Daha fazla sonuç al, sonra filtrele (top_k * 5 ile daha geniş arama)
+        search_k = min(top_k * 5, len(self.documents)) if self.documents else top_k
         distances, indices = self.index.search(query_embedding, search_k)
         
         results = []
         filtered_count = 0
+        all_candidates = []
+        
+        # Önce tüm adayları topla
         for i, idx in enumerate(indices[0]):
             if idx != -1 and idx < len(self.documents):
                 distance = float(distances[0][i])
-                # Filtreleme: Mesafe eşikten küçükse (yani yeterince benzerse) ekle
-                if distance <= threshold:
+                all_candidates.append({
+                    'idx': idx,
+                    'distance': distance
+                })
+        
+        # Threshold filtrelemesi (ama çok gevşek)
+        for candidate in all_candidates:
+            distance = candidate['distance']
+            idx = candidate['idx']
+            
+            if distance <= threshold:
+                doc = self.documents[idx].copy()
+                doc["score"] = distance
+                results.append(doc)
+            else:
+                filtered_count += 1
+                # Eğer çok az sonuç varsa, threshold'u görmezden gel
+                if len(results) < 3 and distance < threshold * 2:  # Çok kötü değilse ekle
                     doc = self.documents[idx].copy()
                     doc["score"] = distance
                     results.append(doc)
-                else:
-                    filtered_count += 1
-                    if filtered_count <= 3:  # İlk 3 filtrelenen sonucu logla
-                        logger.debug(f"[i] Sonuç filtrelendi: score={distance:.3f} > threshold={threshold}")
+                    logger.debug(f"[i] Düşük skor ama eklendi: score={distance:.3f} > threshold={threshold} (az sonuç olduğu için)")
         
-        # En iyi sonuçları döndür (top_k kadar)
+        # En iyi sonuçları döndür (score'a göre sırala)
         results = sorted(results, key=lambda x: x.get('score', float('inf')))[:top_k]
         
         if results:
             logger.debug(f"[i] Vector search: {len(results)}/{search_k} sonuç döndürüldü (threshold: {threshold}, {filtered_count} filtrelendi)")
         else:
-            logger.debug(f"[!] Vector search: Hiç uygun sonuç yok (threshold: {threshold}, toplam: {search_k}, filtrelenen: {filtered_count})")
+            logger.warning(f"[!] Vector search: Hiç uygun sonuç yok (threshold: {threshold}, toplam: {search_k}, filtrelenen: {filtered_count})")
+            # Son çare: En iyi 3 sonucu threshold olmadan döndür
+            if all_candidates:
+                logger.warning(f"[!] Son çare: En iyi 3 sonuç threshold olmadan döndürülüyor")
+                for candidate in sorted(all_candidates, key=lambda x: x['distance'])[:3]:
+                    idx = candidate['idx']
+                    doc = self.documents[idx].copy()
+                    doc["score"] = candidate['distance']
+                    results.append(doc)
         
         return results
 

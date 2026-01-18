@@ -168,25 +168,37 @@ class KnowledgeService:
     def model_search_context(self, question: str) -> List[Dict]:
         """Vektör veritabanından bağlamı çeker."""
         # L2 mesafesi için: küçük mesafe = benzer, büyük mesafe = farklı
-        # 0.8 ideal bir threshold - daha sıkı eşleşme için
-        results = self.vector.search(question, top_k=8, threshold=0.8)
+        # Daha esnek arama stratejisi: Önce geniş arama, sonra filtreleme
         
-        if results:
+        # 1. İlk deneme: Geniş arama (threshold yok, sadece en iyi sonuçlar)
+        results = self.vector.search(question, top_k=10, threshold=2.0)  # Çok gevşek threshold
+        
+        if results and len(results) >= 3:
+            # En iyi 8 sonucu al
+            results = results[:8]
             logger.info(f"[i] Vector search: {len(results)} eşleşme bulundu | Soru: {question[:50]}...")
             # İlk 3 sonucun skorlarını logla
             for i, res in enumerate(results[:3], 1):
                 if res.get('score') is not None:
                     logger.info(f"[i] #{i} eşleşme skoru: {res['score']:.3f} | Kaynak: {res.get('metadata', {}).get('source', 'N/A')}")
+        elif results:
+            # Az sonuç varsa, hepsini kullan
+            logger.info(f"[i] Vector search: {len(results)} eşleşme bulundu (az ama kullanılabilir) | Soru: {question[:50]}...")
+            for i, res in enumerate(results[:2], 1):
+                if res.get('score') is not None:
+                    logger.info(f"[i] #{i} eşleşme skoru: {res['score']:.3f}")
         else:
-            logger.warning(f"[!] Sıkı eşleşme bulunamadı (threshold: 0.8) | Soru: {question[:50]}...")
-            # Threshold'u biraz gevşet ve tekrar dene
-            results = self.vector.search(question, top_k=5, threshold=1.2)
+            # Hiç sonuç yoksa, threshold'u tamamen kaldır ve tüm sonuçları al
+            logger.warning(f"[!] İlk aramada sonuç bulunamadı | Soru: {question[:50]}... | Threshold kaldırılıyor")
+            results = self.vector.search(question, top_k=10, threshold=999.0)  # Pratik olarak threshold yok
             if results:
-                logger.info(f"[i] Gevşek eşleşme ile {len(results)} sonuç bulundu (threshold: 1.2)")
+                # En iyi 5 sonucu al
+                results = results[:5]
+                logger.info(f"[i] Threshold kaldırılarak {len(results)} sonuç bulundu")
                 for i, res in enumerate(results[:2], 1):
                     if res.get('score') is not None:
                         logger.info(f"[i] #{i} eşleşme skoru: {res['score']:.3f}")
             else:
-                logger.warning(f"[!] Hiçbir eşleşme bulunamadı (threshold: 1.2)")
+                logger.warning(f"[!] Hiçbir eşleşme bulunamadı (tüm threshold'lar kaldırıldı)")
         
         return results
