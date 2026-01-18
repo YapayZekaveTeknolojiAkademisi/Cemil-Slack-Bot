@@ -35,7 +35,13 @@ from src.repositories import (
     PollRepository,
     VoteRepository,
     FeedbackRepository,
-    HelpRepository
+    HelpRepository,
+    ChallengeHubRepository,
+    ChallengeParticipantRepository,
+    ChallengeProjectRepository,
+    ChallengeSubmissionRepository,
+    ChallengeThemeRepository,
+    UserChallengeStatsRepository
 )
 
 # --- Services ---
@@ -45,7 +51,9 @@ from src.services import (
     FeedbackService,
     KnowledgeService,
     HelpService,
-    StatisticsService
+    StatisticsService,
+    ChallengeEnhancementService,
+    ChallengeHubService
 )
 
 # --- Handlers ---
@@ -57,7 +65,8 @@ from src.handlers import (
     setup_profile_handlers,
     setup_health_handlers,
     setup_help_handlers,
-    setup_statistics_handlers
+    setup_statistics_handlers,
+    setup_challenge_handlers
 )
 
 # ============================================================================
@@ -106,6 +115,12 @@ poll_repo = PollRepository(db_client)
 vote_repo = VoteRepository(db_client)
 feedback_repo = FeedbackRepository(db_client)
 help_repo = HelpRepository(db_client)
+challenge_hub_repo = ChallengeHubRepository(db_client)
+challenge_participant_repo = ChallengeParticipantRepository(db_client)
+challenge_project_repo = ChallengeProjectRepository(db_client)
+challenge_submission_repo = ChallengeSubmissionRepository(db_client)
+challenge_theme_repo = ChallengeThemeRepository(db_client)
+user_challenge_stats_repo = UserChallengeStatsRepository(db_client)
 logger.info("[+] Repository'ler hazır.")
 
 # ============================================================================
@@ -131,6 +146,16 @@ help_service = HelpService(
 statistics_service = StatisticsService(
     user_repo, match_repo, help_repo, feedback_repo, poll_repo, vote_repo
 )
+challenge_enhancement_service = ChallengeEnhancementService(
+    groq_client, knowledge_service
+)
+challenge_hub_service = ChallengeHubService(
+    chat_manager, conv_manager, user_manager,
+    challenge_hub_repo, challenge_participant_repo,
+    challenge_project_repo, challenge_submission_repo,
+    challenge_theme_repo, user_challenge_stats_repo,
+    challenge_enhancement_service, groq_client, cron_client
+)
 logger.info("[+] Servisler hazır.")
 
 # ============================================================================
@@ -146,6 +171,7 @@ setup_profile_handlers(app, chat_manager, user_repo)
 setup_health_handlers(app, chat_manager, db_client, groq_client, vector_client)
 setup_help_handlers(app, help_service, chat_manager, user_repo)
 setup_statistics_handlers(app, statistics_service, chat_manager, user_repo)
+setup_challenge_handlers(app, challenge_hub_service, chat_manager, user_repo)
 logger.info("[+] Handler'lar kaydedildi.")
 
 # ============================================================================

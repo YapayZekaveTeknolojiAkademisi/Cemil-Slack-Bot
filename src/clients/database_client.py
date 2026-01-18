@@ -221,8 +221,200 @@ class DatabaseClient(metaclass=SingletonMeta):
                     cursor.execute("ALTER TABLE help_requests ADD COLUMN help_channel_id TEXT")
                     logger.info("[+] help_channel_id kolonu eklendi.")
                 
+                # Challenge Hub Tabloları
+                # Challenge Themes (Temalar)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS challenge_themes (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE,
+                        description TEXT,
+                        icon TEXT,
+                        difficulty_range TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Challenge Projects (Proje Şablonları)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS challenge_projects (
+                        id TEXT PRIMARY KEY,
+                        theme TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        objectives TEXT,
+                        deliverables TEXT,
+                        tasks TEXT,
+                        difficulty_level TEXT DEFAULT 'intermediate',
+                        estimated_hours INTEGER DEFAULT 48,
+                        min_team_size INTEGER DEFAULT 2,
+                        max_team_size INTEGER DEFAULT 6,
+                        learning_objectives TEXT,
+                        skills_required TEXT,
+                        skills_developed TEXT,
+                        resources TEXT,
+                        knowledge_base_refs TEXT,
+                        llm_customizable INTEGER DEFAULT 1,
+                        llm_enhancement_prompt TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Challenge Hubs (Ana Challenge'lar)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS challenge_hubs (
+                        id TEXT PRIMARY KEY,
+                        creator_id TEXT NOT NULL,
+                        theme TEXT NOT NULL,
+                        team_size INTEGER NOT NULL,
+                        status TEXT DEFAULT 'recruiting',
+                        challenge_channel_id TEXT,
+                        hub_channel_id TEXT,
+                        selected_project_id TEXT,
+                        llm_customizations TEXT,
+                        deadline_hours INTEGER DEFAULT 48,
+                        difficulty TEXT DEFAULT 'intermediate',
+                        deadline TIMESTAMP,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Challenge Participants (Katılımcılar)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS challenge_participants (
+                        id TEXT PRIMARY KEY,
+                        challenge_hub_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        role TEXT,
+                        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        points_earned INTEGER DEFAULT 0,
+                        UNIQUE(challenge_hub_id, user_id)
+                    )
+                """)
+                
+                # Challenge Submissions (Takım Çıktıları)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS challenge_submissions (
+                        id TEXT PRIMARY KEY,
+                        challenge_hub_id TEXT NOT NULL,
+                        team_name TEXT,
+                        project_name TEXT,
+                        solution_summary TEXT,
+                        deliverables TEXT,
+                        learning_outcomes TEXT,
+                        llm_enhanced_features TEXT,
+                        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        points_awarded INTEGER DEFAULT 0,
+                        creativity_score INTEGER DEFAULT 0,
+                        teamwork_score INTEGER DEFAULT 0
+                    )
+                """)
+                
+                # User Challenge Stats (Kullanıcı İstatistikleri)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_challenge_stats (
+                        user_id TEXT PRIMARY KEY,
+                        total_challenges INTEGER DEFAULT 0,
+                        completed_challenges INTEGER DEFAULT 0,
+                        total_points INTEGER DEFAULT 0,
+                        creativity_points INTEGER DEFAULT 0,
+                        teamwork_points INTEGER DEFAULT 0,
+                        favorite_theme TEXT,
+                        last_challenge_date DATE,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
                 conn.commit()
                 logger.debug("[i] Veritabanı tabloları kontrol edildi.")
+                
+                # Seed data: Temalar ve Projeler
+                self._seed_challenge_data(cursor)
+                conn.commit()
+                
         except sqlite3.Error as e:
             logger.error(f"[X] Veritabanı ilklendirme hatası: {e}")
             raise DatabaseError(f"Tablolar oluşturulamadı: {e}")
+    
+    def _seed_challenge_data(self, cursor):
+        """Challenge temaları ve projeler için seed data ekler."""
+        try:
+            # Temalar
+            themes = [
+                ("theme_ai_chatbot", "AI Chatbot", "Yapay zeka destekli chatbot geliştirme", "🤖", "intermediate-advanced", 1),
+                ("theme_web_app", "Web App", "Modern web uygulaması geliştirme", "🌐", "intermediate-advanced", 1),
+                ("theme_data_analysis", "Data Analysis", "Veri analizi ve görselleştirme projeleri", "📊", "intermediate", 1),
+                ("theme_mobile_app", "Mobile App", "Mobil uygulama geliştirme", "📱", "advanced", 1),
+                ("theme_automation", "Automation", "İş süreçlerini otomatikleştirme", "⚙️", "intermediate", 1),
+            ]
+            
+            for theme_id, name, desc, icon, diff_range, is_active in themes:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO challenge_themes (id, name, description, icon, difficulty_range, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (theme_id, name, desc, icon, diff_range, is_active))
+            
+            # Projeler (AI Chatbot)
+            import json
+            ai_chatbot_projects = [
+                {
+                    "id": "proj_edu_assistant",
+                    "theme": "AI Chatbot",
+                    "name": "Eğitim Asistanı Chatbot",
+                    "description": "Öğrencilerin ders planı çıkaran, soru cevaplayan ve öğrenme yolculuğunu destekleyen akıllı chatbot sistemi.",
+                    "objectives": json.dumps(["Prompt tasarımı", "Akış diyagramı", "Örnek konuşmalar", "Sunum"]),
+                    "deliverables": json.dumps(["prompt", "flow_diagram", "demo_conversations", "presentation"]),
+                    "tasks": json.dumps([
+                        {"title": "Prompt Tasarımı", "description": "Chatbot'un temel prompt'unu tasarla", "estimated_hours": 8},
+                        {"title": "Akış Diyagramı", "description": "Kullanıcı etkileşim akışını tasarla", "estimated_hours": 6},
+                        {"title": "Örnek Konuşmalar", "description": "3 farklı senaryo için örnek diyaloglar", "estimated_hours": 6},
+                        {"title": "Sunum", "description": "Proje sunumu hazırla", "estimated_hours": 4}
+                    ]),
+                    "difficulty_level": "intermediate",
+                    "estimated_hours": 48,
+                    "min_team_size": 2,
+                    "max_team_size": 6
+                },
+                {
+                    "id": "proj_customer_support",
+                    "theme": "AI Chatbot",
+                    "name": "Müşteri Destek Botu",
+                    "description": "E-ticaret sitesi için müşteri sorularını yanıtlayan bot",
+                    "objectives": json.dumps(["FAQ entegrasyonu", "Ticket yönlendirme", "Kişiselleştirilmiş yanıtlar"]),
+                    "deliverables": json.dumps(["faq_database", "routing_flow", "sample_dialogues"]),
+                    "tasks": json.dumps([
+                        {"title": "FAQ Veritabanı", "description": "FAQ şeması ve içerik", "estimated_hours": 8},
+                        {"title": "Yönlendirme Akışı", "description": "Ticket yönlendirme mantığı", "estimated_hours": 6},
+                        {"title": "Örnek Diyaloglar", "description": "Farklı senaryolar için diyaloglar", "estimated_hours": 6}
+                    ]),
+                    "difficulty_level": "intermediate",
+                    "estimated_hours": 48,
+                    "min_team_size": 2,
+                    "max_team_size": 5
+                }
+            ]
+            
+            for project in ai_chatbot_projects:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO challenge_projects 
+                    (id, theme, name, description, objectives, deliverables, tasks, difficulty_level, estimated_hours, min_team_size, max_team_size)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    project["id"],
+                    project["theme"],
+                    project["name"],
+                    project["description"],
+                    project["objectives"],
+                    project["deliverables"],
+                    project["tasks"],
+                    project["difficulty_level"],
+                    project["estimated_hours"],
+                    project["min_team_size"],
+                    project["max_team_size"]
+                ))
+            
+            logger.info("[+] Challenge seed data eklendi.")
+        except Exception as e:
+            logger.warning(f"[!] Challenge seed data eklenirken hata: {e}")
