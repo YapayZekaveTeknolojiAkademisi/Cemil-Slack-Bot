@@ -175,11 +175,13 @@ class ChallengeEvaluationService:
                     "message": "⚠️ Zaten değerlendirme kanalındasınız."
                 }
 
-            # İlk kişi ise kanal oluştur
+            # Değerlendirme kanalı var mı kontrol et (DB'den gerçek değer - race condition için güvenli)
             eval_channel_id = evaluation.get("evaluation_channel_id")
             is_new_channel = False
             welcome_blocks = None
-            if evaluator_count == 0:
+            
+            # Kanal yoksa oluştur (evaluator_count yerine eval_channel_id kontrolü daha güvenli)
+            if not eval_channel_id:
                 challenge = self.hub_repo.get(evaluation["challenge_hub_id"])
                 if not challenge:
                     return {
@@ -231,7 +233,7 @@ class ChallengeEvaluationService:
                     ]
                     is_new_channel = True
 
-                    # 48 saat sonra otomatik kapatma görevi planla
+                    # 48 saat sonra otomatik kapatma görevi planla (sadece kanal ilk açıldığında)
                     self.cron.add_once_job(
                         func=self.finalize_evaluation,
                         delay_minutes=48 * 60,
@@ -239,13 +241,16 @@ class ChallengeEvaluationService:
                         args=[evaluation_id]
                     )
 
-                    logger.info(f"[+] Değerlendirme kanalı oluşturuldu: {eval_channel_id}")
+                    logger.info(f"[+] Değerlendirme kanalı oluşturuldu: {eval_channel_id} | Challenge: {challenge['id']} | 48 saatlik timer başlatıldı")
                 except Exception as e:
                     logger.error(f"[X] Değerlendirme kanalı oluşturulamadı: {e}", exc_info=True)
                     return {
                         "success": False,
                         "message": "❌ Değerlendirme kanalı oluşturulamadı."
                     }
+            else:
+                # Kanal zaten var, mevcut kanala eklenecek
+                logger.info(f"[i] Mevcut değerlendirme kanalı kullanılıyor: {eval_channel_id} | User: {user_id}")
 
             # Kullanıcıyı kanala ekle
             if not eval_channel_id:
