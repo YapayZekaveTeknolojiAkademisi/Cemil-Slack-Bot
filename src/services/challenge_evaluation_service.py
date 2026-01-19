@@ -149,8 +149,9 @@ class ChallengeEvaluationService:
     ) -> Dict[str, Any]:
         """
         Kullanıcıyı değerlendirme kanalına ekler.
-        Max 3 kişi kontrolü yapar.
-        Proje sahipleri (creator + participants) değerlendirmeye katılamaz.
+        Max 3 harici değerlendirici kontrolü yapar.
+        Proje sahipleri (creator + participants) ve Akademi owner kanala
+        girebilir ancak 3 kişilik değerlendirici sınırına dahil edilmez.
         """
         try:
             evaluation = self.evaluation_repo.get(evaluation_id)
@@ -168,40 +169,14 @@ class ChallengeEvaluationService:
                     "message": "❌ Challenge bulunamadı."
                 }
 
-            # Proje sahibi mi kontrol et (creator + participants değerlendirmeye katılamaz)
-            ADMIN_USER_ID = "U02LAJFJJLE"  # Akademi owner
-            if user_id != ADMIN_USER_ID:  # Admin her zaman katılabilir
-                # Creator kontrolü
-                if challenge.get("creator_id") == user_id:
-                    return {
-                        "success": False,
-                        "message": "❌ Kendi projenizi değerlendiremezsiniz."
-                    }
-                
-                # Participant kontrolü
-                participants = self.participant_repo.list(filters={"challenge_hub_id": challenge["id"]})
-                participant_ids = [p["user_id"] for p in participants]
-                if user_id in participant_ids:
-                    return {
-                        "success": False,
-                        "message": "❌ Kendi projenizi değerlendiremezsiniz."
-                    }
+            # Proje ekibi & owner bilgisi
+            ADMIN_USER_ID = "U02LAJFJJLE"  # Akademi owner (her zaman kanala girebilir)
+            creator_id = challenge.get("creator_id")
+            participants = self.participant_repo.list(filters={"challenge_hub_id": challenge["id"]})
+            participant_ids = [p["user_id"] for p in participants]
 
-            # Max 3 kişi kontrolü
-            evaluator_count = self.evaluator_repo.count_evaluators(evaluation_id)
-            if evaluator_count >= 3:
-                return {
-                    "success": False,
-                    "message": "❌ Değerlendirme kanalı dolu (max 3 kişi)."
-                }
-
-            # Zaten eklenmiş mi?
-            existing = self.evaluator_repo.get_by_evaluation_and_user(evaluation_id, user_id)
-            if existing:
-                return {
-                    "success": False,
-                    "message": "⚠️ Zaten değerlendirme kanalındasınız."
-                }
+            is_admin = user_id == ADMIN_USER_ID
+            is_project_member = (user_id == creator_id) or (user_id in participant_ids)
 
             # Değerlendirme kanalı var mı kontrol et (DB'den gerçek değer - race condition için güvenli)
             eval_channel_id = evaluation.get("evaluation_channel_id")
@@ -280,13 +255,57 @@ class ChallengeEvaluationService:
                     "message": "❌ Değerlendirme kanalı bulunamadı."
                 }
 
+            # 1) Proje ekibi (creator + participants) ve admin:
+            #    - Her zaman kanala girebilir
+            #    - 3 kişilik değerlendirici limitine dahil edilmez
+            if is_project_member or is_admin:
+                try:
+                    self.conv.invite_users(eval_channel_id, [user_id])
+                except Exception as e:
+                    logger.warning(f"[!] Kullanıcı kanala davet edilemedi (ekip/admin): {e}")
+
+                # Yeni kanal ilk kez açıldıysa açılış mesajını gönder
+                if is_new_channel and welcome_blocks:
+                    try:
+                        self.chat.post_message(
+                            channel=eval_channel_id,
+                            text="📊 Challenge Değerlendirme",
+                            blocks=welcome_blocks
+                        )
+                    except Exception as e:
+                        logger.warning(f"[!] Değerlendirme açılış mesajı gönderilemedi: {e}")
+
+                logger.info(f"[+] Proje ekibi/admin değerlendirme kanalına eklendi: {user_id} | Evaluation: {evaluation_id}")
+
+                return {
+                    "success": True,
+                    "message": f"✅ Değerlendirme kanalına eklendiniz! <#{eval_channel_id}>"
+                }
+
+            # 2) Harici değerlendiriciler:
+            # Max 3 kişi kontrolü (sadece harici değerlendiriciler sayılır)
+            evaluator_count = self.evaluator_repo.count_evaluators(evaluation_id)
+            if evaluator_count >= 3:
+                return {
+                    "success": False,
+                    "message": "❌ Değerlendirme kanalı dolu (max 3 değerlendirici)."
+                }
+
+            # Zaten değerlendirici olarak eklenmiş mi?
+            existing = self.evaluator_repo.get_by_evaluation_and_user(evaluation_id, user_id)
+            if existing:
+                return {
+                    "success": False,
+                    "message": "⚠️ Zaten değerlendirme kanalındasınız."
+                }
+
+            # Kullanıcıyı (ve ConversationManager içindeki mantıkla botu) kanala davet et
             try:
-                # Kullanıcıyı (ve ConversationManager içindeki mantıkla botu) kanala davet et
                 self.conv.invite_users(eval_channel_id, [user_id])
             except Exception as e:
                 logger.warning(f"[!] Kullanıcı kanala davet edilemedi: {e}")
 
-            # Değerlendirici kaydı oluştur
+            # Değerlendirici kaydı oluştur (harici kullanıcı için)
             evaluator_id = str(uuid.uuid4())
             self.evaluator_repo.create({
                 "id": evaluator_id,
