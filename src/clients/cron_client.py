@@ -81,11 +81,17 @@ class CronClient(metaclass=SingletonMeta):
                 'date',
                 id=job_id,
                 run_date=run_date,
-                args=wrapped_args
+                args=wrapped_args,
+                replace_existing=True  # Aynı job_id varsa güncelle
             )
             logger.info(f"[+] Tek seferlik görev planlandı: {job.id} (Çalışma: {run_date})")
             return job.id
         except Exception as e:
+            # ConflictingIdError durumunda (replace_existing=True ile bu olmamalı ama yine de kontrol)
+            error_str = str(e)
+            if "conflicts with an existing job" in error_str.lower() or "ConflictingIdError" in error_str:
+                logger.warning(f"[!] Job zaten planlanmış, atlanıyor: {job_id}")
+                return job_id  # Job zaten var, ID'yi döndür
             logger.error(f"[X] Tek seferlik görev planlanırken hata: {e}")
             raise CemilBotError(f"Tek seferlik iş planlanamadı: {e}")
 
