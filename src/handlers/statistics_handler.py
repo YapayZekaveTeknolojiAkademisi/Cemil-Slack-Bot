@@ -85,7 +85,7 @@ def setup_statistics_handlers(
                 user=user_id,
                 text="❌ İstatistikler alınırken bir hata oluştu. Lütfen logları kontrol edin."
             )
-    
+
     @app.command("/admin-basarili-projeler")
     def handle_admin_successful_projects(ack, body):
         """Başarılı challenge projelerini listeler (Sadece adminler)."""

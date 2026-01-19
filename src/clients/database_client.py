@@ -135,6 +135,23 @@ class DatabaseClient(metaclass=SingletonMeta):
                     cursor.execute("ALTER TABLE users_new RENAME TO users")
                     logger.info("[+] Veritabanı şeması temizlendi: Sadece gerekli kolonlar kaldı (id, slack_id, first_name, middle_name, surname, full_name, birthday, cohort).")
 
+                # Akademi admin kullanıcısını garanti altına al
+                try:
+                    admin_slack_id = "U02LAJFJJLE"
+                    cursor.execute("SELECT id FROM users WHERE slack_id = ?", (admin_slack_id,))
+                    admin_row = cursor.fetchone()
+                    if not admin_row:
+                        admin_id = str(uuid.uuid4())
+                        cursor.execute("""
+                            INSERT INTO users (id, slack_id, full_name, cohort, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, (admin_id, admin_slack_id, "Akademi Admini", "Owner"))
+                        logger.info(f"[+] Akademi admin kullanıcısı eklendi: {admin_slack_id} (ID: {admin_id})")
+                    else:
+                        logger.debug(f"[i] Akademi admin kullanıcısı zaten mevcut: {admin_slack_id}")
+                except Exception as admin_seed_error:
+                    logger.warning(f"[!] Akademi admin kullanıcısı seed edilirken hata: {admin_seed_error}")
+
                 # Eşleşme Takip Tablosu (Matches)
                 # Mevcut şemada foreign key'ler users(id)'ye bağlıydı, ancak uygulama Slack ID kullanıyor.
                 # Foreign key hatalarını önlemek için tabloyu yeniden oluşturup users(slack_id)'ye bağlarız.
