@@ -39,7 +39,7 @@ class ChallengeEvaluationService:
     async def start_evaluation(
         self,
         challenge_id: str,
-        challenge_channel_id: str
+        trigger_channel_id: str
     ) -> Dict[str, Any]:
         """
         Challenge için değerlendirme başlatır.
@@ -73,6 +73,11 @@ class ChallengeEvaluationService:
                 "deadline_at": deadline.isoformat()
             }
             self.evaluation_repo.create(evaluation_data)
+
+            # Mesajın gönderileceği kanal:
+            # Öncelik: hub_channel (challenge ilanının olduğu ortak kanal),
+            # yoksa tetikleyen kanal (trigger_channel_id)
+            target_channel = challenge.get("hub_channel_id") or trigger_channel_id
 
             # Challenge kanalına mesaj gönder
             blocks = [
@@ -117,7 +122,7 @@ class ChallengeEvaluationService:
             ]
 
             self.chat.post_message(
-                channel=challenge_channel_id,
+                channel=target_channel,
                 text="🎯 Challenge Tamamlandı! Projeyi değerlendirmek için butona tıklayın.",
                 blocks=blocks
             )

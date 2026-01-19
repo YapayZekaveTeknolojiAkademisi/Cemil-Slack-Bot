@@ -339,28 +339,42 @@ def setup_challenge_handlers(
             eval_repo = ChallengeEvaluationRepository(db_client)
             existing = eval_repo.get_by_challenge(challenge["id"])
             if existing:
-                chat_manager.post_ephemeral(
-                    channel=channel_id,
-                    user=user_id,
-                    text="ℹ️ Bu challenge için değerlendirme zaten başlatılmış."
-                )
+                # Mesajı hub kanalına veya mevcut kanala gönder (challenge kanalı arşivlenmiş olabilir)
+                target_channel = challenge.get("hub_channel_id") or channel_id
+                try:
+                    chat_manager.post_ephemeral(
+                        channel=target_channel,
+                        user=user_id,
+                        text="ℹ️ Bu challenge için değerlendirme zaten başlatılmış."
+                    )
+                except Exception as e:
+                    logger.warning(f"[!] Challenge finish ephemeral (already started) gönderilemedi: {e}")
                 return
             
             # Challenge'ı kapat (_close_challenge fonksiyonu değerlendirmeyi başlatır ve kanalı arşivler)
             try:
                 await challenge_service._close_challenge(challenge["id"], channel_id)
-                chat_manager.post_ephemeral(
-                    channel=channel_id,
-                    user=user_id,
-                    text="✅ Challenge bitirildi! Değerlendirme başlatıldı ve kanal arşivlendi."
-                )
+                target_channel = challenge.get("hub_channel_id") or channel_id
+                try:
+                    chat_manager.post_ephemeral(
+                        channel=target_channel,
+                        user=user_id,
+                        text="✅ Challenge bitirildi! Değerlendirme başlatıldı ve challenge kanalı arşivlendi."
+                    )
+                except Exception as e:
+                    # Kanal arşivlenmişse veya başka bir Slack hatası varsa, sadece logla
+                    logger.warning(f"[!] Challenge finish ephemeral gönderilemedi: {e}")
             except Exception as e:
                 logger.error(f"[X] Challenge bitirme hatası: {e}", exc_info=True)
-                chat_manager.post_ephemeral(
-                    channel=channel_id,
-                    user=user_id,
-                    text=f"❌ Challenge bitirilirken hata oluştu: {str(e)}"
-                )
+                target_channel = challenge.get("hub_channel_id") or channel_id
+                try:
+                    chat_manager.post_ephemeral(
+                        channel=target_channel,
+                        user=user_id,
+                        text=f"❌ Challenge bitirilirken hata oluştu: {str(e)}"
+                    )
+                except Exception as inner_e:
+                    logger.warning(f"[!] Challenge finish hata mesajı gönderilemedi: {inner_e}")
         
         asyncio.run(process_finish())
 
