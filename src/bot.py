@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
+from datetime import datetime
 
 # --- Core & Clients ---
 from src.core.logger import logger
@@ -301,6 +302,106 @@ def global_error_handler(error, body, logger):
             )
         except Exception:
             pass # Hata mesajı gönderirken hata oluşursa yut
+
+# ============================================================================
+# ENGLISH CONVERSATION CLUB (DAILY)
+# ============================================================================
+
+# Gemini promptu: 2 kelime ve 3 topic oluşturuyor.
+DAILY_SYSTEM_PROMPT = """You are the Coordinator for an English Conversation Club. 
+I will provide you with TODAY'S DATE. Your task is to generate a 'Daily Discussion Card'.
+
+STRICT OUTPUT RULES:
+1. HEADER: 
+   - Convert the provided date into full English text (e.g., "Twenty-First of January, Twenty-Twenty-Six").
+2. TOPIC: 
+   - Select a RANDOM, engaging, and unique topic suitable for A1-B2 levels. 
+   - Do not repeat generic topics; be creative (e.g., Space Travel, Minimalist Living, Coffee Culture, Digital Nomads).
+3. VOCABULARY: 
+   - Create a Markdown table with EXACTLY 2 high-quality words related to the selected topic.
+   - Format: | Word | Meaning (English) | Turkish (Brief) |
+4. DISCUSSION QUESTIONS: 
+   - Provide exactly 3 open-ended questions to start the conversation.
+   - Start with bold prefixes (e.g., **The Idea:**).
+
+STYLE:
+- Minimalist, clean, and ready for Slack.
+- No filler text like "Sure, here is the content". Just the content."""
+
+@app.command("/daily")
+def handle_daily_command(ack, say, command):
+    #* 1. Slack'e komutu aldığımızı bildiriyoruz (Zorunlu)
+    ack()
+    
+    user_id = command['user_id']
+    user_text = command.get('text', '').strip()  # Kullanıcının yazdığı metin
+    
+    #* 2. VALIDATION (KAPI BEKÇİSİ)
+    # Eğer kullanıcı tam olarak "English" yazmadıysa (büyük/küçük harf duyarsız) çalışmasın.
+    if user_text.lower() != "english":
+        #todo Kullanıcıya sadece kendisinin göreceği (ephemeral) bir hata mesajı dönülebilir
+        # Ama şimdilik sessiz kalmasını veya basit bir uyarı vermesini sağlıyoruz.
+        say(
+            text="⚠️ Hatalı komut.",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "⚠️ *Bu komut şu an sadece English Conversation Club için aktif.*\n\nLütfen çalıştırmak için tam olarak şunu yaz:\n👉 `/daily English`"
+                    }
+                }
+            ]
+        )
+        return  # Fonksiyondan çık, yapay zekayı çalıştırma.
+
+    #* 3. TARİH VE HAZIRLIK
+    # Buraya geldiyse kullanıcı "English" yazmıştır.
+    current_date = datetime.now().strftime("%d.%m.%Y")
+    
+    # Kullanıcıya bilgi veriyoruz
+    say(f"🇬🇧 *English Conversation Club* ({current_date}) için içerik hazırlanıyor, beklerken belki bir /kahve ? :)")
+    
+    try:
+        # 4. YAPAY ZEKA ÇAĞRISI (Asenkron)
+        # GroqClient bir Singleton olduğu için direkt çağırıyoruz.
+        client = GroqClient()
+        
+        # Async fonksiyonu, sync bir fonksiyon içinde çağırmak için asyncio.run kullanıyoruz.
+        response = asyncio.run(
+            client.quick_ask(
+                system_prompt=DAILY_SYSTEM_PROMPT,
+                user_prompt=f"Today is {current_date}. Generate the daily conversation card."
+            )
+        )
+        
+        # 5. SONUCU PAYLAŞ
+        say(
+            text="Daily Conversation Card", # Bildirimlerde görünen önizleme metni
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": response
+                    }
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Generated for Conversation Club via Groq AI 🧠 | Requested by <@{user_id}>"
+                        }
+                    ]
+                }
+            ]
+        )
+        
+    except Exception as e:
+        # Hata loglaması (Projenin kendi logger'ını kullanarak)
+        logger.error(f"Daily command error: {e}", exc_info=True)
+        say(f"❌ Bir hata oluştu: {str(e)}")
 
 # ============================================================================
 # BOT BAŞLATMA
