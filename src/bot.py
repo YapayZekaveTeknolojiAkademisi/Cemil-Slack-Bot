@@ -6,10 +6,13 @@ Ana bot dosyası: Tüm servislerin entegrasyonu ve slash komutları
 
 import os
 import asyncio
+import random
+import time
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
+from datetime import datetime
 
 # --- Core & Clients ---
 from src.core.logger import logger
@@ -301,6 +304,156 @@ def global_error_handler(error, body, logger):
             )
         except Exception:
             pass # Hata mesajı gönderirken hata oluşursa yut
+
+# ============================================================================
+# ENGLISH CONVERSATION CLUB (DAILY)
+# ============================================================================
+
+# Gemini promptu: 2 kelime ve 3 topic oluşturuyor.
+DAILY_SYSTEM_PROMPT = """You are the Coordinator for an English Conversation Club.
+I will provide you with TODAY'S DATE. 
+Your task is to generate a 'Daily Discussion Card'.
+
+STRICT OUTPUT RULES (Slack mrkdwn ONLY):
+- Output must be valid Slack mrkdwn.
+- DO NOT use Markdown headings (no '#', '##', '###').
+- DO NOT use tables.
+- DO NOT use code blocks (```).
+- Use '*' for bold and '_' for italic (Slack style only).
+- Use bullet points with '-' only.
+- For the vocabulary "table", use a code block with fixed-width alignment (``` ... ```).
+- Do not include any extra commentary, labels like "Here is", or explanations. 
+
+Output only the card.CARD STRUCTURE (exact order):
+1) HEADER:
+- Convert the provided date into full English text (e.g., "Twenty-First of January, Twenty-Twenty-Six").
+- Print it as one bold line.
+
+2) TOPIC:
+- One line: *Topic:* <topic>
+- Topic must be engaging, unique, and suitable for A1–B2 levels.
+- IMPORTANT: Focus on "Daily Life of a Professional" or "Soft Tech". 
+- Examples: Remote work habits, coffee culture in offices, time management apps, LinkedIn networking, favorite desk setups, or the impact of AI on daily emails.
+- AVOID: Extremely academic, scientific, or highly technical jargon. Keep it "social" and "conversational".
+
+3) VOCABULARY:
+- Title line:
+*Vocabulary (2 words):*
+- Exactly TWO words.
+- Each word must be its own visual block.
+
+- Format EACH word EXACTLY like this: (3 lines)
+*Word*: Simple meaning in clear English
+*Translation*: Turkish meaning
+_Example:_ short&basic example sentence
+
+- Leave ONE empty line between word blocks.
+- Do NOT add extra lines or symbols.
+
+4) DISCUSSION QUESTIONS:
+- Title line:
+*Discussion Questions*
+- Exactly 3 questions.
+- Each question must start with a bold prefix EXACTLY like:
+*Q1:* ...
+*Q2:* ...
+*Q3:* ...
+
+STYLE:
+- Minimalist, clean, ready for Slack.
+- No emojis.
+- No headings.
+- No tables except the code block above."""
+
+@app.command("/daily")
+def handle_daily_command(ack, say, command, respond):
+    #* 1. Slack'e komutu aldığımızı bildiriyoruz (Zorunlu)
+    ack()
+    
+    user_id = command['user_id']
+    user_text = command.get('text', '').strip().lower()  # Kullanıcının yazdığı metin
+    #büyük küçük harf ve boşluk duyarsız?
+    
+    #* 2. VALIDATION (KAPI BEKÇİSİ)
+    if user_text != "english":
+    # respond() kullanarak sadece komutu yazan kişiye mesaj gönderiyoruz
+        respond(
+            text="⚠️ Hatalı komut.",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        #todo daily üzerine yeni komut eklendiğinde bu yazı patates olur
+                        "text": "⚠️ *Bu komut şu an sadece English Conversation Club için aktif.*\n\nLütfen çalıştırmak için tam olarak şunu yaz:\n👉 `/daily English`"
+                    }
+                }
+            ],
+            response_type="ephemeral" # Bu satır mesajın gizli kalmasını sağlar
+        )
+        return
+
+    #* 3. TARİH VE HAZIRLIK
+    # Buraya geldiyse kullanıcı "English" yazmıştır.
+
+    current_date_str = datetime.now().strftime("%d.%m.%Y") #günü aldık
+    random_seed = random.randint(1000, 9999) #random input aldık konu seçimi için
+
+# Hazırlık mesajını sadece kullanıcıya özel (ephemeral) gönderiyoruz
+    respond(
+        text=f"🇬🇧 *English Conversation Club* ({current_date_str}) için içerik hazırlanıyor, lütfen bekleyin...",
+        response_type="ephemeral"
+    )
+
+    try:
+        # 1. İstemciyi başlat (Singleton olduğu için performans kaybı yaratmaz)
+        client = GroqClient()
+        
+        # 2. Dinamik Prompt Hazırla (Rastgelelik burada sağlanıyor)
+        # NOT: DAILY_SYSTEM_PROMPT hala "Kuralları" koyuyor, dynamic_user_prompt ise "Görevi" veriyor.
+
+        dynamic_user_prompt = (
+        f"Today is {current_date_str}. (Seed: {random_seed}).\n"
+        "Generate a light-hearted, conversational topic related to work-life, "
+        "career growth, or simple daily technology habits. Make it fun for a chat!"
+        )
+
+        # 3. YAPAY ZEKA ÇAĞRISI
+        # quick_ask arkada DAILY_SYSTEM_PROMPT'u "Anayasa" olarak kullanmaya devam eder.
+        response = asyncio.run(
+            client.quick_ask(
+                system_prompt=DAILY_SYSTEM_PROMPT,
+                user_prompt=dynamic_user_prompt
+            )
+        )
+        
+        # 4. SONUCU KANALA GÖNDER (Bunu herkes görsün)
+        say(
+            text="Daily Conversation Card",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": response
+                    }
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Generated for Conversation Club via Groq AI 🧠 | Requested by <@{user_id}>"
+                        }
+                    ]
+                }
+            ]
+        )
+
+    except Exception as e:
+        # Hata durumunda log tut ve kullanıcıyı bilgilendir
+        logger.error(f"Daily command error: {e}", exc_info=True)
+        respond(text=f"❌ Üzgünüm, kart oluşturulurken bir teknik hata oluştu: {str(e)}")
 
 # ============================================================================
 # BOT BAŞLATMA
