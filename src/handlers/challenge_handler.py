@@ -28,12 +28,27 @@ def setup_challenge_handlers(
         window_seconds=settings.rate_limit_window
     )
 
+    # İzin verilen komut kanalları (opsiyonel)
+    allowed_channels_raw = settings.allowed_command_channels or ""
+    ALLOWED_COMMAND_CHANNELS = {
+        c.strip() for c in allowed_channels_raw.split(",") if c.strip()
+    }
+
     @app.command("/challenge")
     def handle_challenge_command(ack, body):
         """Challenge komutları."""
         ack()
         user_id = body["user_id"]
         channel_id = body["channel_id"]
+
+        # Kanal kısıtı: Eğer liste boş değilse ve bu kanal listede yoksa çalışmasın
+        if ALLOWED_COMMAND_CHANNELS and channel_id not in ALLOWED_COMMAND_CHANNELS:
+            chat_manager.post_ephemeral(
+                channel=channel_id,
+                user=user_id,
+                text="⚠️ Bu komutu sadece belirli kanallarda kullanabilirsiniz."
+            )
+            return
         text = body.get("text", "").strip()
 
         # Komut parse et

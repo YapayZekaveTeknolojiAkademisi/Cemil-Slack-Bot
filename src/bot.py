@@ -171,7 +171,8 @@ challenge_enhancement_service = ChallengeEnhancementService(
 challenge_evaluation_service = ChallengeEvaluationService(
     chat_manager, conv_manager,
     challenge_evaluation_repo, challenge_evaluator_repo,
-    challenge_hub_repo, challenge_participant_repo, cron_client
+    challenge_hub_repo, challenge_participant_repo,
+    user_challenge_stats_repo, cron_client
 )
 challenge_hub_service = ChallengeHubService(
     chat_manager, conv_manager, user_manager,
@@ -236,6 +237,17 @@ try:
     logger.info("[+] Değerlendirme kontrolü başlatıldı (her 1 saatte bir)")
 except Exception as e:
     logger.warning(f"[!] Değerlendirme kontrolü başlatılamadı: {e}")
+
+# Takımı dolmayan challenge'ları periyodik olarak kontrol et (her gün 03:00'da)
+try:
+    cron_client.add_cron_job(
+        func=challenge_hub_service.monitor_recruitment_timeouts,
+        cron_expression={"hour": "3", "minute": "0"},
+        job_id="monitor_recruitment_timeouts"
+    )
+    logger.info("[+] Challenge recruitment zaman aşımı kontrolü başlatıldı (her gün 03:00)")
+except Exception as e:
+    logger.warning(f"[!] Challenge recruitment zaman aşımı kontrolü başlatılamadı: {e}")
 
 # ============================================================================
 # EVENT HANDLERS (Challenge Kanalı Yetkisiz Kullanıcı Kontrolü)

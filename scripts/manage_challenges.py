@@ -231,6 +231,24 @@ class ChallengeManager:
                 return
 
         try:
+            # Get existing record for backup
+            cursor.execute("SELECT * FROM challenge_hubs WHERE id = ?", (target_id,))
+            hub_row = cursor.fetchone()
+            
+            if hub_row:
+                # Store a mini-backup in logs/deleted_challenges.json for safety
+                import json
+                log_dir = "logs"
+                if not os.path.exists(log_dir): os.makedirs(log_dir)
+                
+                backup_data = {
+                    "deleted_at": datetime.now().isoformat(),
+                    "hub": dict(hub_row)
+                }
+                
+                with open(os.path.join(log_dir, "deleted_challenges.log"), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(backup_data, ensure_ascii=False) + "\n")
+
             # Delete children first
             cursor.execute("DELETE FROM challenge_participants WHERE challenge_hub_id = ?", (target_id,))
             cursor.execute("DELETE FROM challenge_evaluators WHERE evaluation_id IN (SELECT id FROM challenge_evaluations WHERE challenge_hub_id = ?)", (target_id,))
@@ -240,7 +258,7 @@ class ChallengeManager:
             cursor.execute("DELETE FROM challenge_hubs WHERE id = ?", (target_id,))
             conn.commit()
             
-            console.print(f"[bold green]✅ Challenge deleted successfully![/bold green]")
+            console.print(f"[bold green]✅ Challenge deleted successfully! (A safety backup was saved to logs/deleted_challenges.log)[/bold green]")
 
         except Exception as e:
             console.print(f"[bold red]❌ Error: {e}[/bold red]")
@@ -286,10 +304,6 @@ class ChallengeManager:
                 # Force status to cancelled
                 cursor.execute("UPDATE challenge_hubs SET status = 'cancelled' WHERE id = ?", (row['id'],))
                 console.print(f"   [green]Challenge cancelled.[/green]")
-
-        conn.commit()
-        conn.close()
-        console.print(f"[bold green]✅ User {user_id} has been reset. They can now start/join new challenges.[/bold green]")
 
         conn.commit()
         conn.close()
@@ -425,10 +439,22 @@ class ChallengeManager:
             # 7. Insert Hub
             import uuid
             hub_id = str(uuid.uuid4())
+            
+            # Try to get default values for new columns
+            hub_channel_id = self.settings.startup_channel or "C00000000" # fallback
+            
             cursor.execute("""
-                INSERT INTO challenge_hubs (id, creator_id, theme, team_size, status, challenge_channel_id, selected_project_id, created_at, started_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (hub_id, creator_id, selected_theme, len(human_members), 'active', channel_id, selected_project_id, created_at, created_at))
+                INSERT INTO challenge_hubs (
+                    id, creator_id, theme, team_size, status, 
+                    challenge_channel_id, hub_channel_id, selected_project_id, 
+                    created_at, started_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                hub_id, creator_id, selected_theme, len(human_members), 'active', 
+                channel_id, hub_channel_id, selected_project_id, 
+                created_at, created_at
+            ))
             
             # 8. Insert Participants
             for m_id in human_members:
@@ -451,6 +477,11 @@ class ChallengeManager:
         console.print(Panel("[bold yellow]🛠️  Manual Challenge Entry / Restore[/bold yellow]"))
         
         try:
+            import uuid
+            
+            hub_id = input("Enter Challenge ID (Leave empty for new UUID): ").strip()
+            if not hub_id: hub_id = str(uuid.uuid4())
+            
             channel_id = input("Enter Slack Channel ID (C...): ").strip()
             theme = input("Enter Theme Name (e.g. AI Chatbot): ").strip()
             creator_id = input("Enter Creator Slack ID (U...): ").strip()
@@ -458,26 +489,40 @@ class ChallengeManager:
             
             p_ids = [p.strip() for p in participants_raw.split(",") if p.strip()]
             
+            # Advanced fields
+            hub_channel_id = input("Enter Hub Channel ID (Optional): ").strip() or None
+            project_id = input("Enter Selected Project ID (Optional): ").strip() or None
+            difficulty = input("Difficulty (easy, intermediate, hard) [intermediate]: ").strip() or "intermediate"
+            deadline_h = int(input("Deadline Hours [48]: ").strip() or "48")
+            
+            created_at = input("Created At (YYYY-MM-DD HH:MM:SS) [Now]: ").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             console.print("\n[bold]Select Status:[/bold]")
             console.print("1. Recruiting 🟡")
             console.print("2. Active 🟢 (Default)")
             console.print("3. Evaluating 🟣")
             console.print("4. Completed 🔵")
+            console.print("5. Failed 🔴")
             status_choice = input("Choice [2]: ") or "2"
-            status_map = {"1": "recruiting", "2": "active", "3": "evaluating", "4": "completed"}
+            status_map = {"1": "recruiting", "2": "active", "3": "evaluating", "4": "completed", "5": "failed"}
             status = status_map.get(status_choice, "active")
 
-            # 1. Hub table entry
-            import uuid
-            hub_id = str(uuid.uuid4())
-            
             conn = self.get_connection()
             cursor = conn.cursor()
             
+            # 1. Hub table entry
             cursor.execute("""
-                INSERT INTO challenge_hubs (id, creator_id, theme, team_size, status, challenge_channel_id, created_at, started_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (hub_id, creator_id, theme, len(p_ids), status, channel_id))
+                INSERT INTO challenge_hubs (
+                    id, creator_id, theme, team_size, status, 
+                    challenge_channel_id, hub_channel_id, selected_project_id,
+                    difficulty, deadline_hours, created_at, started_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                hub_id, creator_id, theme, len(p_ids), status, 
+                channel_id, hub_channel_id, project_id,
+                difficulty, deadline_h, created_at, created_at
+            ))
             
             # 2. Participants
             for m_id in p_ids:
@@ -489,10 +534,139 @@ class ChallengeManager:
             conn.commit()
             conn.close()
             
-            console.print(f"[bold green]✅ Success! Manual record created with Hub ID: {hub_id[:8]}[/bold green]")
+            console.print(f"[bold green]✅ Success! Manual record created with Hub ID: {hub_id[:12]}...[/bold green]")
             
         except Exception as e:
             console.print(f"[bold red]❌ Error during manual creation: {e}[/bold red]")
+
+    def export_challenge(self, challenge_id: str):
+        """Export a challenge and its related data to JSON."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Handle Short ID
+        target_id = challenge_id
+        if len(challenge_id) < 30:
+             cursor.execute("SELECT id FROM challenge_hubs WHERE id LIKE ?", (f"{challenge_id}%",))
+             row = cursor.fetchone()
+             if row: target_id = row['id']
+             else:
+                 console.print(f"[bold red]❌ Challenge not found: {challenge_id}[/bold red]")
+                 conn.close()
+                 return
+        
+        # 1. Hub
+        cursor.execute("SELECT * FROM challenge_hubs WHERE id = ?", (target_id,))
+        hub_row = cursor.fetchone()
+        if not hub_row:
+             console.print(f"[bold red]❌ Challenge not found: {challenge_id}[/bold red]")
+             conn.close()
+             return
+        hub = dict(hub_row)
+        
+        # 2. Participants
+        cursor.execute("SELECT * FROM challenge_participants WHERE challenge_hub_id = ?", (target_id,))
+        participants = [dict(row) for row in cursor.fetchall()]
+        
+        # 3. Evaluations
+        cursor.execute("SELECT * FROM challenge_evaluations WHERE challenge_hub_id = ?", (target_id,))
+        evaluations = [dict(row) for row in cursor.fetchall()]
+        
+        # 4. Evaluators
+        eval_ids = [e['id'] for e in evaluations]
+        evaluators = []
+        if eval_ids:
+            placeholders = ", ".join(["?"] * len(eval_ids))
+            cursor.execute(f"SELECT * FROM challenge_evaluators WHERE evaluation_id IN ({placeholders})", eval_ids)
+            evaluators = [dict(row) for row in cursor.fetchall()]
+            
+        conn.close()
+        
+        data = {
+            "type": "challenge_backup",
+            "version": "1.0",
+            "exported_at": datetime.now().isoformat(),
+            "hub": hub,
+            "participants": participants,
+            "evaluations": evaluations,
+            "evaluators": evaluators
+        }
+        
+        import json
+        json_output = json.dumps(data, indent=2, ensure_ascii=False)
+        
+        console.print(Panel(f"[bold green]✅ Challenge exported successfully![/bold green]\nCopy the JSON below to restore it later."))
+        console.print(json_output)
+        
+        # Optionally save to file
+        filename = f"challenge_{target_id[:8]}_backup.json"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(json_output)
+        console.print(f"\n[dim]Also saved to: {filename}[/dim]")
+
+    def restore_from_json(self):
+        """Restore challenge data from a JSON backup."""
+        import json
+        
+        console.print("[yellow]Paste your JSON content below. Press Ctrl+D (Linux/Mac) or Ctrl+Z (Win) followed by Enter when finished.[/yellow]")
+        try:
+            content = sys.stdin.read()
+            if not content.strip():
+                console.print("[red]No content provided.[/red]")
+                return
+                
+            data = json.loads(content)
+            if data.get("type") != "challenge_backup":
+                 console.print("[red]❌ Error: Invalid backup format. Must be a 'challenge_backup' type.[/red]")
+                 return
+            
+            hub = data["hub"]
+            participants = data.get("participants", [])
+            evaluations = data.get("evaluations", [])
+            evaluators = data.get("evaluators", [])
+            
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            # Start transaction
+            cursor.execute("BEGIN TRANSACTION")
+            
+            try:
+                # 1. Hub
+                cols = ", ".join(hub.keys())
+                placeholders = ", ".join(["?"] * len(hub))
+                cursor.execute(f"INSERT OR REPLACE INTO challenge_hubs ({cols}) VALUES ({placeholders})", list(hub.values()))
+                
+                # 2. Participants
+                for p in participants:
+                    cols = ", ".join(p.keys())
+                    placeholders = ", ".join(["?"] * len(p))
+                    cursor.execute(f"INSERT OR REPLACE INTO challenge_participants ({cols}) VALUES ({placeholders})", list(p.values()))
+                
+                # 3. Evaluations
+                for e in evaluations:
+                    cols = ", ".join(e.keys())
+                    placeholders = ", ".join(["?"] * len(e))
+                    cursor.execute(f"INSERT OR REPLACE INTO challenge_evaluations ({cols}) VALUES ({placeholders})", list(e.values()))
+                
+                # 4. Evaluators
+                for ev in evaluators:
+                    cols = ", ".join(ev.keys())
+                    placeholders = ", ".join(["?"] * len(ev))
+                    cursor.execute(f"INSERT OR REPLACE INTO challenge_evaluators ({cols}) VALUES ({placeholders})", list(ev.values()))
+                
+                conn.commit()
+                console.print(f"[bold green]✅ Success! Challenge restored: {hub['id'][:12]} ({hub.get('theme')})[/bold green]")
+            except Exception as e:
+                conn.rollback()
+                console.print(f"[bold red]❌ Restoration failed: {e}[/bold red]")
+            finally:
+                conn.close()
+                
+        except json.JSONDecodeError as e:
+            console.print(f"[bold red]❌ Error: Invalid JSON syntax. {e}[/bold red]")
+        except Exception as e:
+            console.print(f"[bold red]❌ Error: {e}[/bold red]")
 
 
 def interactive_menu():
@@ -510,7 +684,9 @@ def interactive_menu():
         console.print("[5] 🔄 Update Status")
         console.print("[6] 👤 Reset User")
         console.print("[7] 🗑️  Delete Challenge")
-        console.print("[8] 🛠️  Manual Entry (Restore)")
+        console.print("[8] 🛠️  Manual Entry (Create Form)")
+        console.print("[9] 📥 Restore from JSON")
+        console.print("[10] 📤 Export to JSON")
         console.print("[0] 🚪 Exit")
         
         choice = input("\n👉 Select an option: ")
@@ -578,8 +754,18 @@ def interactive_menu():
                 manager.delete_challenge(cid)
                 input("\nPress Enter to continue...")
                 
-        elif choice == "8": # New option
+        elif choice == "8":
             manager.manual_create_challenge()
+            input("\nPress Enter to continue...")
+        
+        elif choice == "9":
+            manager.restore_from_json()
+            input("\nPress Enter to continue...")
+
+        elif choice == "10":
+            cid = input("Enter Challenge ID to export: ")
+            if cid:
+                manager.export_challenge(cid)
             input("\nPress Enter to continue...")
                 
         elif choice == "0":
@@ -617,6 +803,13 @@ def main():
     reset_parser = subparsers.add_parser("reset-user", help="Fix a stuck user")
     reset_parser.add_argument("user_id", help="Slack User ID (e.g. U12345)")
 
+    # Export
+    export_parser = subparsers.add_parser("export", help="Export a challenge to JSON")
+    export_parser.add_argument("id", help="Challenge ID")
+
+    # Restore
+    restore_parser = subparsers.add_parser("restore", help="Restore challenge from JSON")
+
     # Eğer argüman verilmemişse interaktif moda geç
     if len(sys.argv) == 1:
         try:
@@ -639,6 +832,10 @@ def main():
         manager.delete_challenge(args.id, args.yes)
     elif args.command == "reset-user":
         manager.reset_user(args.user_id)
+    elif args.command == "export":
+        manager.export_challenge(args.id)
+    elif args.command == "restore":
+        manager.restore_from_json()
     else:
         parser.print_help()
 

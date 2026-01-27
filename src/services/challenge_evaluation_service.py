@@ -13,7 +13,8 @@ from src.repositories import (
     ChallengeEvaluationRepository,
     ChallengeEvaluatorRepository,
     ChallengeHubRepository,
-    ChallengeParticipantRepository
+    ChallengeParticipantRepository,
+    UserChallengeStatsRepository
 )
 from src.clients import CronClient
 from src.core.settings import get_settings
@@ -30,6 +31,7 @@ class ChallengeEvaluationService:
         evaluator_repo: ChallengeEvaluatorRepository,
         hub_repo: ChallengeHubRepository,
         participant_repo: ChallengeParticipantRepository,
+        stats_repo: UserChallengeStatsRepository,
         cron_client: CronClient
     ):
         self.chat = chat_manager
@@ -38,7 +40,188 @@ class ChallengeEvaluationService:
         self.evaluator_repo = evaluator_repo
         self.hub_repo = hub_repo
         self.participant_repo = participant_repo
+        self.stats_repo = stats_repo
         self.cron = cron_client
+
+    async def update_challenge_canvas(self, challenge_id: str) -> None:
+        """
+        Duyuru kanalındaki challenge özet/canvas mesajını günceller veya yoksa oluşturur.
+        - Challenge adı/tema
+        - Proje adı & açıklaması (varsa)
+        - Katılımcılar
+        - GitHub linki & public durumu (varsa)
+        - Challenge & değerlendirme durumu
+        """
+        try:
+            challenge = self.hub_repo.get(challenge_id)
+            if not challenge:
+                logger.warning(f"[!] Canvas güncelleme: Challenge bulunamadı: {challenge_id}")
+                return
+
+            hub_channel_id = challenge.get("hub_channel_id")
+            if not hub_channel_id:
+                # Duyuru kanalı yoksa yapacak bir şey yok
+                logger.debug(f"[i] Canvas güncelleme: hub_channel_id yok, atlanıyor | Challenge: {challenge_id}")
+                return
+
+            # İlgili değerlendirme (varsa)
+            evaluation = self.evaluation_repo.get_by_challenge(challenge_id)
+
+            github_url = None
+            github_public = False
+            eval_status = None
+            final_result = None
+            true_votes = 0
+            false_votes = 0
+
+            if evaluation:
+                github_url = evaluation.get("github_repo_url")
+                github_public = evaluation.get("github_repo_public", 0) == 1
+                eval_status = evaluation.get("status")
+                final_result = evaluation.get("final_result")
+                try:
+                    votes = self.evaluator_repo.get_votes(evaluation["id"])
+                    true_votes = votes.get("true", 0)
+                    false_votes = votes.get("false", 0)
+                except Exception:
+                    pass
+
+            # Katılımcılar
+            participants = self.participant_repo.get_team_members(challenge_id)
+            participant_ids = [p["user_id"] for p in participants]
+            creator_id = challenge.get("creator_id")
+            if creator_id and creator_id not in participant_ids:
+                participant_ids.insert(0, creator_id)
+
+            # Durum metni
+            challenge_status = challenge.get("status", "unknown")
+            status_label = "Bilinmiyor"
+            if challenge_status == "recruiting":
+                status_label = "Takım Toplanıyor"
+            elif challenge_status == "active":
+                status_label = "Geliştirme Aşaması"
+            elif challenge_status == "evaluating":
+                status_label = "Değerlendirme Aşaması"
+            elif challenge_status == "completed":
+                if final_result == "success":
+                    status_label = "Tamamlandı (Başarılı)"
+                elif final_result == "failed":
+                    status_label = "Tamamlandı (Başarısız)"
+                else:
+                    status_label = "Tamamlandı"
+
+            # GitHub bilgisi
+            if github_url:
+                github_status = f"{'✅ Public' if github_public else '⚠️ Private'} - {github_url}"
+            else:
+                github_status = "Henüz eklenmedi (`/challenge set github <link>`)"
+
+            # Özet blokları oluştur
+            theme = challenge.get("theme", "Challenge")
+            project_name = challenge.get("project_name") or "Proje adı henüz belirlenmedi"
+            project_desc = challenge.get("project_description") or "Henüz açıklama bulunmuyor."
+
+            participants_text = (
+                ", ".join(f"<@{uid}>" for uid in participant_ids)
+                if participant_ids else "Henüz katılımcı yok."
+            )
+
+            deadline = challenge.get("deadline")
+            deadline_text = (
+                datetime.fromisoformat(deadline).strftime("%d.%m %H:%M")
+                if deadline else "Belirlenmedi"
+            )
+
+            header_text = f"📌 *{theme}* – *{project_name}*"
+
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": header_text},
+                },
+                {
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Durum:*\n{status_label}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Bitiş:*\n{deadline_text}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Katılımcılar:*\n{participants_text}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*GitHub:*\n{github_status}",
+                        },
+                    ],
+                },
+                {"type": "divider"},
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Proje Açıklaması:*\n{project_desc}",
+                    },
+                },
+            ]
+
+            # Değerlendirme bilgisi varsa küçük bir özet ekle
+            if evaluation:
+                eval_line = f"*Değerlendirme Durumu:* {eval_status or 'bilinmiyor'} | *Oylar:* ✅ {true_votes} / ❌ {false_votes}"
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": eval_line,
+                            }
+                        ],
+                    }
+                )
+
+            summary_ts = challenge.get("summary_message_ts")
+
+            # Mevcut mesajı güncelle veya yeni mesaj oluştur
+            if summary_ts:
+                try:
+                    self.chat.update_message(
+                        channel=hub_channel_id,
+                        ts=summary_ts,
+                        text=header_text,
+                        blocks=blocks,
+                    )
+                    logger.info(f"[+] Challenge canvas/özet mesajı güncellendi | Challenge: {challenge_id}")
+                    return
+                except Exception as e:
+                    logger.warning(f"[!] Canvas mesajı güncellenemedi, yeniden oluşturulacak: {e}")
+
+            # Yeni mesaj oluştur
+            try:
+                resp = self.chat.post_message(
+                    channel=hub_channel_id,
+                    text=header_text,
+                    blocks=blocks,
+                )
+                ts = resp.get("ts") or (resp.get("message") or {}).get("ts")
+                if ts:
+                    self.hub_repo.update(
+                        challenge_id,
+                        {
+                            "summary_message_ts": ts,
+                            "summary_message_channel_id": hub_channel_id,
+                        },
+                    )
+                logger.info(f"[+] Challenge için yeni canvas/özet mesajı oluşturuldu | Challenge: {challenge_id}")
+            except Exception as e:
+                logger.warning(f"[!] Canvas mesajı oluşturulamadı: {e}")
+        except Exception as e:
+            logger.error(f"[X] Canvas güncelleme hatası: {e}", exc_info=True)
 
     async def start_evaluation(
         self,
@@ -200,6 +383,12 @@ class ChallengeEvaluationService:
                 text=f"📣 Jüri Aranıyor: {challenge.get('theme')}",
                 blocks=info_blocks
             )
+
+            # Duyuru kanalındaki challenge canvas/özet mesajını güncelle
+            try:
+                await self.update_challenge_canvas(challenge_id)
+            except Exception as e:
+                logger.warning(f"[!] Değerlendirme başlangıcında canvas güncellenemedi: {e}")
 
             logger.info(f"[+] Değerlendirme başlatıldı | Challenge: {challenge_id} | Evaluation: {evaluation_id}")
 
@@ -596,6 +785,12 @@ class ChallengeEvaluationService:
                 "github_repo_public": 1 if is_public else 0
             })
 
+            # Challenge canvas/özet mesajını güncelle
+            try:
+                await self.update_challenge_canvas(evaluation["challenge_hub_id"])
+            except Exception as e:
+                logger.warning(f"[!] GitHub linki sonrasında canvas güncellenemedi: {e}")
+
             # Eğer repo public ve 3 kişi oy verdiyse admin onayı iste
             if is_public:
                 votes = self.evaluator_repo.get_votes(evaluation_id)
@@ -829,6 +1024,32 @@ class ChallengeEvaluationService:
                 })
                 logger.info(f"[+] Challenge status güncellendi: {challenge_id} | Status: completed")
                 
+                logger.info(f"[+] Challenge status güncellendi: {challenge_id} | Status: completed")
+                
+                # Başarı durumunda istatistikleri ve puanları güncelle
+                if final_result == "success":
+                    try:
+                        # Puan miktarı (varsayılan: 100)
+                        POINTS_PER_SUCCESS = 100
+                        
+                        # Katılımcıları al
+                        participants = self.participant_repo.get_team_members(challenge_id)
+                        participant_ids = [p["user_id"] for p in participants]
+                        
+                        # Owner'ı al (eğer katılımcılar arasında değilse ekle)
+                        creator_id = challenge.get("creator_id")
+                        if creator_id and creator_id not in participant_ids:
+                            participant_ids.append(creator_id)
+                        
+                        # Herkese puan ver ve başarı sayısını artır
+                        for user_id in participant_ids:
+                            self.stats_repo.add_points(user_id, POINTS_PER_SUCCESS)
+                            self.stats_repo.increment_completed(user_id)
+                            logger.info(f"[+] Puan ve başarı güncellendi: {user_id} | Challenge: {challenge_id}")
+                            
+                    except Exception as e:
+                        logger.error(f"[X] Başarı istatistikleri güncellenirken hata: {e}", exc_info=True)
+
                 # Sonuç mesajını hem challenge kanalına hem ana kanala gönder
                 result_blocks = [
                     {
@@ -873,20 +1094,64 @@ class ChallengeEvaluationService:
                         )
                     except Exception as e:
                         logger.warning(f"[!] Challenge kanalına sonuç mesajı gönderilemedi (kanal arşivlenmiş olabilir): {e}")
-
-            # Değerlendirme kanalını kapat
+            # Değerlendirme kanalına bitiş mesajı gönder ve 1 saat sonra kapat
             eval_channel_id = evaluation.get("evaluation_channel_id")
             if eval_channel_id:
                 try:
-                    self.conv.archive_channel(eval_channel_id)
-                    logger.info(f"[+] Değerlendirme kanalı arşivlendi: {eval_channel_id}")
+                    # Kapanma saatini hesapla
+                    close_time = (datetime.now() + timedelta(hours=1)).strftime("%H:%M")
+
+                    self.chat.post_message(
+                        channel=eval_channel_id,
+                        text="🏁 *Değerlendirme Tamamlandı!*",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": (
+                                        f"🏁 *Değerlendirme süreci sona erdi.*\n\n"
+                                        f"Sonuçları yukarıdaki mesajdan veya ana kanaldan takip edebilirsiniz.\n\n"
+                                        f"⏳ *Önemli:* Bu kanal saat *{close_time}*'de (1 saat sonra) otomatik olarak arşivlenecektir. Bu süre zarfında mesajları kontrol edebilirsiniz. 👋"
+                                    )
+                                }
+                            }
+                        ]
+                    )
+
+                    # Kanalı 1 saat sonra arşivlemek üzere planla
+                    delay_hours = 1
+                    self.cron.add_once_job(
+                        func=self._archive_channel_delayed,
+                        delay_minutes=delay_hours * 60,
+                        job_id=f"archive_evaluation_{evaluation_id}",
+                        args=[evaluation_id, eval_channel_id]
+                    )
+                    logger.info(f"[+] Değerlendirme kanalı 1 saat sonra arşivlenmek üzere planlandı (Saat: {close_time}) | ID: {evaluation_id}")
                 except Exception as e:
-                    logger.warning(f"[!] Değerlendirme kanalı arşivlenemedi: {e}")
+                    logger.warning(f"[!] Değerlendirme kanalı mesaj gönderimi veya arşivleme planı hatası: {e}")
+
+            # Canvas/özet mesajını son durum ile güncelle
+            try:
+                await self.update_challenge_canvas(challenge_id)
+            except Exception as e:
+                logger.warning(f"[!] Finalize sonrası canvas güncellenemedi: {e}")
 
             logger.info(f"[+] Değerlendirme finalize edildi: {evaluation_id} | Sonuç: {final_result}")
 
         except Exception as e:
             logger.error(f"[X] Değerlendirme finalize hatası: {e}", exc_info=True)
+
+    def _archive_channel_delayed(self, evaluation_id: str, channel_id: str):
+        """Kanalı gecikmeli olarak arşivler (Cron tarafından çağrılır)."""
+        try:
+            success = self.conv.archive_channel(channel_id)
+            if success:
+                logger.info(f"[+] Değerlendirme kanalı başarıyla arşivlendi: {channel_id} | Evaluation: {evaluation_id}")
+            else:
+                logger.warning(f"[!] Değerlendirme kanalı arşivlenemedi: {channel_id} | Evaluation: {evaluation_id}")
+        except Exception as e:
+            logger.error(f"[X] Gecikmeli değerlendirme kanalı arşivleme hatası: {e} | Kanal: {channel_id}")
 
     async def force_complete_evaluation(self, evaluation_id: str, admin_user_id: str, result: str) -> Dict[str, Any]:
         """
@@ -905,6 +1170,8 @@ class ChallengeEvaluationService:
             if not evaluation:
                 return {"success": False, "message": "❌ Değerlendirme bulunamadı."}
 
+            challenge_id = evaluation["challenge_hub_id"]
+
             # Sonucu ayarla
             final_result = result
             result_message = ""
@@ -920,31 +1187,73 @@ class ChallengeEvaluationService:
                 "completed_at": datetime.now().isoformat()
             })
 
-            # Challenge HUB güncelle
-            challenge_id = evaluation["challenge_hub_id"]
-            self.hub_repo.update(challenge_id, {
-                "status": "completed",
-                "completed_at": datetime.now().isoformat()
-            })
+            self.hub_repo.update(
+                challenge_id,
+                {
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                },
+            )
+
+            # Başarı durumunda istatistikleri ve puanları güncelle (Force Complete için de)
+            if final_result == "success":
+                try:
+                    POINTS_PER_SUCCESS = 100
+                    challenge = self.hub_repo.get(challenge_id)
+                    participants = self.participant_repo.get_team_members(challenge_id)
+                    participant_ids = [p["user_id"] for p in participants]
+                    creator_id = challenge.get("creator_id") if challenge else None
+                    if creator_id and creator_id not in participant_ids:
+                        participant_ids.append(creator_id)
+
+                    for user_id in participant_ids:
+                        self.stats_repo.add_points(user_id, POINTS_PER_SUCCESS)
+                        self.stats_repo.increment_completed(user_id)
+                        logger.info(f"[+] Force success: Puan ve başarı güncellendi: {user_id}")
+                except Exception as e:
+                    logger.error(f"[X] Force success istatistikleri güncellenirken hata: {e}")
+
+            # Canvas/özet mesajını güncelle
+            try:
+                await self.update_challenge_canvas(challenge_id)
+            except Exception as e:
+                logger.warning(f"[!] Force complete sonrası canvas güncellenemedi: {e}")
 
             # Bildirim gönder
             eval_channel_id = evaluation.get("evaluation_channel_id")
             if eval_channel_id:
                 try:
+                    # Kapanma saatini hesapla
+                    close_time = (datetime.now() + timedelta(hours=1)).strftime("%H:%M")
+                    
                     self.chat.post_message(
                         channel=eval_channel_id,
                         text=result_message,
-                        blocks=[{
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": f"{result_message}\n\n👤 İşlemi Yapan: <@{admin_user_id}>"}
-                        }]
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": f"{result_message}\n\n👤 İşlemi Yapan: <@{admin_user_id}>"}
+                            },
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"⏳ *Önemli:* Bu kanal saat *{close_time}* civarında (1 saat sonra) otomatik olarak arşivlenecektir. 👋"
+                                }
+                            }
+                        ]
                     )
-                    # Kanalı arşivle
-                    import time
-                    time.sleep(2) # Mesajın gitmesi için kısa bekleme
-                    self.conv.archive_channel(eval_channel_id)
+                    
+                    # Kanalı 1 saat sonra arşivlemek üzere planla
+                    self.cron.add_once_job(
+                        func=self._archive_channel_delayed,
+                        delay_minutes=60,
+                        job_id=f"archive_evaluation_force_{evaluation_id}",
+                        args=[evaluation_id, eval_channel_id]
+                    )
+                    logger.info(f"[+] Değerlendirme kanalı zorla kapatma sonrası 1 saat sonra arşivlenecek | ID: {evaluation_id}")
                 except Exception as e:
-                    logger.warning(f"[!] Force complete mesaj/arşiv hatası: {e}")
+                    logger.warning(f"[!] Force complete mesaj/arşiv planlama hatası: {e}")
 
             return {
                 "success": True, 

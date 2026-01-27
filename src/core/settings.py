@@ -30,6 +30,10 @@ class BotSettings(BaseSettings):
         description="Başlangıç mesajı kanalı",
         validation_alias="SLACK_STARTUP_CHANNEL"
     )
+    allowed_command_channels: Optional[str] = Field(
+        None,
+        description="Virgülle ayrılmış izinli komut kanal ID listesi (örn: C123,C456)"
+    )
     
     # GitHub Repo (Opsiyonel)
     github_repo: Optional[str] = Field(None, description="GitHub repository URL")
@@ -50,7 +54,11 @@ class BotSettings(BaseSettings):
     vector_store_pkl_path: str = Field("data/vector_store.pkl", description="Vector store pickle dosya yolu")
     
     # Database Ayarları
-    database_path: str = Field("data/cemil_bot.db", description="SQLite veritabanı yolu")
+    database_path: str = Field(
+        "data/cemil_bot.db", 
+        description="SQLite veritabanı yolu",
+        validation_alias="DB_PATH"
+    )
     
     # Knowledge Base Ayarları
     knowledge_base_path: str = Field("knowledge_base", description="Bilgi küpü klasör yolu")

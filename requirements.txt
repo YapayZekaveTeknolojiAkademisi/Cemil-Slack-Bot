@@ -14,4 +14,3 @@ faiss-cpu
 numpy
 rich
 pyyaml
-

@@ -584,6 +584,9 @@ class ChallengeHubService:
                 "theme": theme_name,
                 "challenge_channel_id": challenge_channel_id,
                 "selected_project_id": project["id"],
+                # Canvas/özet için gerekli temel proje bilgileri
+                "project_name": project.get("name"),
+                "project_description": project.get("description"),
                 "deadline_hours": deadline_hours,
                 "difficulty": difficulty,
                 "llm_customizations": json.dumps(enhanced_project.get("llm_enhanced_features", [])),
@@ -593,6 +596,15 @@ class ChallengeHubService:
             
             self.hub_repo.update(challenge_id, update_data)
             logger.info(f"[+] Challenge güncellendi: {challenge_id}")
+
+            # 7.1. Duyuru kanalında challenge özeti/canvas mesajını oluştur veya güncelle
+            try:
+                if self.evaluation_service:
+                    # Evaluation servisi, hub + evaluation + github bilgilerini birleştirerek
+                    # duyuru kanalındaki özet mesajı güncelleyecek.
+                    await self.evaluation_service.update_challenge_canvas(challenge_id)
+            except Exception as e:
+                logger.warning(f"[!] Challenge canvas/özet mesajı güncellenemedi: {e}")
 
             # 8. Challenge içeriğini kanala gönder
             try:
@@ -646,58 +658,13 @@ class ChallengeHubService:
         Challenge içeriğini kanala gönderir - Önce açıklama, sonra proje detayları.
         """
         try:
-            # 1. ÖNCE: Challenge nedir ve ne bekleniyor açıklaması
+            # 1. Karşılama ve Temel Bilgiler (Kısa ve net)
             intro_blocks = [
                 {
                     "type": "header",
                     "text": {
                         "type": "plain_text",
-                        "text": "🚀 CHALLENGE BAŞLADI!",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": (
-                            "🎯 *Challenge Nedir?*\n\n"
-                            "Challenge, takım halinde belirli bir süre içinde bir proje geliştirmenizi sağlayan "
-                            "mini bir hackathon deneyimidir. Bu challenge'da birlikte çalışarak yeni beceriler "
-                            "öğrenecek, takım çalışması deneyimi kazanacak ve gerçek bir proje üreteceksiniz.\n\n"
-                            "💡 *Sizden Ne Bekleniyor?*\n\n"
-                            "• *Takım Çalışması:* Görevleri birlikte planlayın ve paylaşın\n"
-                            "• *Proje Geliştirme:* Belirlenen süre içinde projeyi tamamlayın\n"
-                            "• *İletişim:* Bu kanalda aktif olun, sorularınızı paylaşın\n"
-                            "• *Öğrenme:* Yeni teknolojiler ve yöntemler deneyin\n"
-                            "• *Eğlence:* Eğlenerek öğrenin ve takım arkadaşlarınızla iyi vakit geçirin\n\n"
-                            "⏱️ *Süre:* Challenge'ınız *{deadline_hours} saat* içinde tamamlanmalı.\n"
-                            "📊 *Takım:* {team_size} kişilik bir takımsınız (Challenge sahibi + {participants} katılımcı).\n\n"
-                            "🎉 *Başarılar dileriz!*"
-                        ).format(
-                            deadline_hours=deadline_hours,
-                            team_size=challenge['team_size'] + 1,
-                            participants=challenge['team_size']
-                        )
-                    }
-                },
-                {"type": "divider"}
-            ]
-            
-            # İlk mesajı gönder (açıklama)
-            self.chat.post_message(
-                channel=channel_id,
-                text="🚀 CHALLENGE BAŞLADI! Challenge nedir ve sizden ne bekleniyor?",
-                blocks=intro_blocks
-            )
-            
-            # 2. SONRA: Proje detayları
-            project_blocks = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"📋 Proje: {project.get('name', 'Proje')}",
+                        "text": "🚀 Challenge Başladı!",
                         "emoji": True
                     }
                 },
@@ -706,34 +673,53 @@ class ChallengeHubService:
                     "fields": [
                         {
                             "type": "mrkdwn",
-                            "text": f"*Tema:*\n{self._get_theme_icon(theme_name)} {theme_name}"
+                            "text": f"*⏱️ Süre:*\n{deadline_hours} saat"
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Süre:*\n{deadline_hours} saat"
+                            "text": f"*👥 Takım:*\n{challenge['team_size'] + 1} kişi"
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Takım:*\n{challenge['team_size'] + 1} kişi (Owner + {challenge['team_size']} katılımcı)"
+                            "text": f"*🎯 Hedef:*\nProjeyi tamamla!"
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Zorluk:*\n{project.get('difficulty_level', 'intermediate').capitalize()}"
+                            "text": f"*📅 Bitiş:*\n{(datetime.now() + timedelta(hours=deadline_hours)).strftime('%d.%m %H:%M')}"
                         }
                     ]
                 },
-                {"type": "divider"},
+                {"type": "divider"}
+            ]
+            
+            # İlk mesajı gönder
+            self.chat.post_message(
+                channel=channel_id,
+                text="🚀 Challenge başladı!",
+                blocks=intro_blocks
+            )
+            
+            # 2. Proje Detayları (Sadece önemli bilgiler)
+            project_blocks = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": f"📋 {project.get('name', 'Proje')}",
+                        "emoji": True
+                    }
+                },
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*📝 Proje Açıklaması:*\n{project.get('description', '')}"
+                        "text": f"*Açıklama:*\n{project.get('description', '')}"
                     }
                 },
                 {"type": "divider"}
             ]
             
-            # Başarı kriterleri
+            # Başarı kriterleri (en önemli 5 tanesi)
             objectives = project.get("objectives", [])
             if isinstance(objectives, str):
                 try:
@@ -742,25 +728,20 @@ class ChallengeHubService:
                     objectives = []
             
             if objectives:
+                obj_text = "*✅ Yapılması Gerekenler:*\n\n"
+                for i, obj in enumerate(objectives[:5], 1):
+                    obj_text += f"{i}. {obj}\n"
+                
                 project_blocks.append({
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "*✅ Başarılı Olmak İçin Yapılması Gerekenler:*"
+                        "text": obj_text
                     }
                 })
-                
-                for i, obj in enumerate(objectives[:10], 1):  # İlk 10 hedef
-                    project_blocks.append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"*{i}.* {obj}"
-                        }
-                    })
                 project_blocks.append({"type": "divider"})
 
-            # Görevler
+            # Görevler (Sadece başlıklar, detaysız - en fazla 5 tanesi)
             tasks = project.get("tasks", [])
             if isinstance(tasks, str):
                 try:
@@ -769,135 +750,59 @@ class ChallengeHubService:
                     tasks = []
 
             if tasks:
-                project_blocks.append({
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "*📋 Görevler ve Zaman Planı:*"
-                    }
-                })
-
-                for i, task in enumerate(tasks[:10], 1):  # İlk 10 görev
+                task_text = "*📋 Görevler:*\n\n"
+                for i, task in enumerate(tasks[:5], 1):
                     task_title = task.get("title", task.get("name", f"Görev {i}"))
-                    task_desc = task.get("description", "")
-                    task_hours = task.get("estimated_hours", 8)
-                    
-                    project_blocks.append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": (
-                                f"*{i}. {task_title}*\n"
-                                f"{task_desc}\n"
-                                f"⏱️ *Tahmini Süre:* {task_hours} saat"
-                            )
-                        }
-                    })
-
-            # LLM özellikleri
-            llm_features = project.get("llm_enhanced_features", [])
-            if llm_features:
-                project_blocks.append({"type": "divider"})
-                project_blocks.append({
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "*✨ LLM ile Eklenen Özel Özellikler:*\n\nBu özellikler projenize özel olarak eklenmiştir. Projeyi daha ilginç ve öğretici hale getirmek için tasarlanmıştır."
-                    }
-                })
-
-                for feature in llm_features:
-                    project_blocks.append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": (
-                                f"*🎨 {feature.get('name', 'Özellik')}*\n"
-                                f"{feature.get('description', '')}"
-                            )
-                        }
-                    })
-
-            # Teslim edilecekler (deliverables)
-            deliverables = project.get("deliverables", [])
-            if isinstance(deliverables, str):
-                try:
-                    deliverables = json.loads(deliverables)
-                except:
-                    deliverables = []
-            
-            if deliverables:
-                project_blocks.append({"type": "divider"})
-                project_blocks.append({
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "*📦 Teslim Edilecekler:*"
-                    }
-                })
+                    task_hours = task.get("estimated_hours", "?")
+                    task_text += f"{i}. {task_title} (⏱️ ~{task_hours}h)\n"
                 
-                for i, deliverable in enumerate(deliverables[:10], 1):
-                    project_blocks.append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"*{i}.* {deliverable}"
-                        }
-                    })
+                project_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": task_text
+                    }
+                })
+                project_blocks.append({"type": "divider"})
 
-            # Süre bilgisi
-            project_blocks.append({"type": "divider"})
-            deadline_dt = datetime.now() + timedelta(hours=deadline_hours)
+            # Tek satırda önemli bilgiler
             project_blocks.append({
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        f"⏰ *Toplam Süre:* {deadline_hours} saat\n"
-                        f"📅 *Bitiş Tarihi:* {deadline_dt.strftime('%d.%m.%Y %H:%M')}\n\n"
-                        f"💡 *İpucu:* Görevleri takım arkadaşlarınızla paylaşın ve zamanı verimli kullanın!"
+                        f"📌 *Zorluk:* {project.get('difficulty_level', 'intermediate').capitalize()} | "
+                        f"*Tema:* {self._get_theme_icon(theme_name)} {theme_name}"
                     )
                 }
             })
 
-            # İkinci mesajı gönder (proje detayları)
+            # İkinci mesajı gönder
             self.chat.post_message(
                 channel=channel_id,
-                text=f"📋 Proje: {project.get('name', 'Proje')} - Detaylar, görevler ve teslim edilecekler",
+                text=f"📋 Proje: {project.get('name', 'Proje')}",
                 blocks=project_blocks
             )
             
-            # 3. Kanal kuralları ve önemli bilgiler
+            # 3. Önemli Kurallar (Kısa)
             rules_blocks = [
                 {"type": "divider"},
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "📌 *KANAL KURALLARI VE ÖNEMLİ BİLGİLER*"
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
                         "text": (
-                            "⚠️ *ÖNEMLİ:*\n\n"
-                            "• Bu kanal sadece challenge takımı için oluşturulmuştur\n"
-                            "• *Lütfen kanala başka kişileri davet etmeyin*\n"
-                            "• Kanal sadece challenge süresi boyunca aktif kalacaktır\n"
-                            "• Challenge bitince kanal otomatik olarak kapatılacaktır\n\n"
-                            "💡 *İletişim:*\n"
-                            "• Tüm sorularınızı bu kanalda paylaşabilirsiniz\n"
-                            "• Takım arkadaşlarınızla işbirliği yapın\n"
-                            "• Proje ilerlemesini bu kanalda paylaşın\n\n"
-                            "🎯 *Hedef:* Belirlenen süre içinde projeyi tamamlamak ve öğrenmek!"
+                            "📌 *Önemli Bilgiler*\n\n"
+                            "⚠️ Bu kanal sadece takım içindir - başkalarını davet etmeyin\n"
+                            "💬 Sorularınızı ve ilerlemenizi bu kanalda paylaşın\n"
+                            "🎯 Bitirmek için: `/challenge finish` komutunu kullanın\n\n"
+                            "Başarılar! 🚀"
                         )
                     }
                 }
             ]
             
-            # Üçüncü mesajı gönder (kanal kuralları)
+            # Üçüncü mesajı gönder
             self.chat.post_message(
                 channel=channel_id,
                 text="📌 Kanal kuralları ve önemli bilgiler",
@@ -918,11 +823,10 @@ class ChallengeHubService:
                 logger.error(f"[X] Challenge bulunamadı: {challenge_id}")
                 return
             
-            # Challenge'ı tamamlandı olarak işaretle
-            self.hub_repo.update(challenge_id, {
-                "status": "completed",
-                "completed_at": datetime.now().isoformat()
-            })
+            # Başlangıçta temel verileri hazırla
+            update_data = {
+                "ended_at": datetime.now().isoformat()
+            }
             
             # Tüm katılımcıların istatistiklerini güncelle (creator + participants)
             try:
@@ -945,6 +849,7 @@ class ChallengeHubService:
                 logger.warning(f"[!] İstatistik güncelleme hatası: {e}")
             
             # Değerlendirme başlat (KANAL ARŞİVLENMEDEN ÖNCE - mesaj göndermek için)
+            evaluation_started = False
             evaluation_channel_id = None
             if self.evaluation_service:
                 try:
@@ -952,6 +857,7 @@ class ChallengeHubService:
                     logger.info(f"[+] Değerlendirme başlatıldı | Challenge: {challenge_id}")
                     
                     if eval_result.get("success"):
+                        evaluation_started = True
                         evaluation_channel_id = eval_result.get("evaluation_channel_id")
                         
                         # Challenge kanalına veda ve yönlendirme mesajı at
@@ -968,7 +874,7 @@ class ChallengeHubService:
                                                 f"🎊 *Tebrikler Ekip! Challenge Tamamlandı!* 🎊\n\n"
                                                 f"Süreç artık *Değerlendirme Aşamasına* geçti.\n"
                                                 f"Tüm ekip üyeleri otomatik olarak yeni kanala taşınıyor: <#{evaluation_channel_id}>\n\n"
-                                                f"Bu kanal birazdan arşivlenecektir. Görüşmek üzere! 👋"
+                                                f"⏳ *Önemli:* Bu kanal *4 saat sonra* otomatik olarak arşivlenecektir. Bu süre zarfında değerlendirme kanalına geçiş yapabilir ve eski mesajları kontrol edebilirsiniz. 👋"
                                             )
                                         }
                                     }
@@ -977,30 +883,130 @@ class ChallengeHubService:
                 except Exception as e:
                     logger.warning(f"[!] Değerlendirme başlatılamadı: {e}")
             
-            # Challenge Status'unu GÜNCELLE (Recruiting/Active -> Evaluating)
-            # Bu sayede kullanıcı hemen yeni challenge açabilir (çünkü start_challenge sadece Active/Recruiting kontrol ediyor)
+            # Challenge Status'unu GÜNCELLE
+            if evaluation_started:
+                update_data["status"] = "evaluating"
+            else:
+                update_data["status"] = "completed"
+                update_data["completed_at"] = datetime.now().isoformat()
+            
             try:
-                self.hub_repo.update(challenge_id, {
-                    "status": "evaluating",
-                    "ended_at": datetime.now().isoformat()
-                })
-                logger.info(f"[+] Challenge status güncellendi: {challenge_id} | Status: evaluating")
+                self.hub_repo.update(challenge_id, update_data)
+                logger.info(f"[+] Challenge status güncellendi: {challenge_id} | Status: {update_data['status']}")
             except Exception as e:
                 logger.error(f"[X] Challenge status güncellenemedi: {e}")
 
-            # Kanalı arşivle (kapat) - Değerlendirme mesajı gönderildikten SONRA
+            # Kanalı 4 saat sonra arşivlemek üzere planla
             try:
-                success = self.conv.archive_channel(channel_id)
-                if success:
-                    logger.info(f"[+] Challenge kanalı arşivlendi (kapatıldı) | ID: {challenge_id}")
-                else:
-                    logger.warning(f"[!] Challenge kanalı arşivlenemedi | ID: {challenge_id}")
+                delay_hours = 4
+                self.cron.add_once_job(
+                    func=self._archive_channel_delayed,
+                    delay_minutes=delay_hours * 60,
+                    job_id=f"archive_challenge_{challenge_id}",
+                    args=[challenge_id, channel_id]
+                )
+                logger.info(f"[+] Challenge kanalı 4 saat sonra arşivlenmek üzere planlandı | ID: {challenge_id}")
             except Exception as e:
-                logger.warning(f"[!] Challenge kanalı arşivlenirken hata: {e}")
+                logger.warning(f"[!] Challenge kanalı arşivleme görevi planlanamadı: {e}")
             
             logger.info(f"[+] Challenge kapatıldı | ID: {challenge_id}")
         except Exception as e:
             logger.error(f"[X] Challenge kapatma hatası: {e}", exc_info=True)
+
+    def _archive_channel_delayed(self, challenge_id: str, channel_id: str):
+        """Kanalı gecikmeli olarak arşivler (Cron tarafından çağrılır)."""
+        try:
+            success = self.conv.archive_channel(channel_id)
+            if success:
+                logger.info(f"[+] Kanal başarıyla arşivlendi: {channel_id} | Challenge: {challenge_id}")
+            else:
+                logger.warning(f"[!] Kanal arşivlenemedi: {channel_id} | Challenge: {challenge_id}")
+        except Exception as e:
+            logger.error(f"[X] Gecikmeli kanal arşivleme hatası: {e} | Kanal: {channel_id}")
+
+    async def leave_challenge(self, user_id: str, challenge_id: str) -> Dict[str, Any]:
+        """
+        Kullanıcının bir challenge'dan ayrılmasını sağlar (Sadece recruiting durumunda).
+        """
+        try:
+            challenge = self.hub_repo.get(challenge_id)
+            if not challenge:
+                return {"success": False, "message": "❌ Challenge bulunamadı."}
+
+            if challenge.get("status") != "recruiting":
+                return {"success": False, "message": "❌ Sadece katılım aşamasındaki challenge'lardan ayrılabilirsiniz."}
+
+            # Katılımcı mı kontrol et
+            participant = self.participant_repo.get_by_challenge_and_user(challenge_id, user_id)
+            if not participant:
+                return {"success": False, "message": "❌ Bu challenge'ın bir parçası değilsiniz."}
+
+            # Sahibi mı kontrol et
+            is_owner = challenge.get("creator_id") == user_id
+
+            if is_owner:
+                # Sahibi ayrılırsa challenge iptal edilir
+                self.hub_repo.update(challenge_id, {"status": "cancelled", "ended_at": datetime.now().isoformat()})
+                logger.info(f"[-] Challenge iptal edildi (sahibi ayrıldı) | ID: {challenge_id}")
+                message = "📉 Challenge sahibi ayrıldığı için challenge iptal edildi."
+            else:
+                # Normal katılımcı ayrılırsa sadece katılımcı silinir
+                self.participant_repo.delete(participant["id"])
+                logger.info(f"[-] Kullanıcı challenge'dan ayrıldı: {user_id} | ID: {challenge_id}")
+                message = "✅ Challenge'dan başarıyla ayrıldınız."
+
+            # Hub kanalına güncelleme gönder
+            hub_channel_id = challenge.get("hub_channel_id")
+            if hub_channel_id:
+                try:
+                    if is_owner:
+                        self.chat.post_message(channel=hub_channel_id, text=f"📉 Bir challenge sahibi tarafından iptal edildi.")
+                    else:
+                        updated_participants = self.participant_repo.get_team_members(challenge_id)
+                        count = len(updated_participants)
+                        self.chat.post_message(channel=hub_channel_id, text=f"🏃 Bir katılımcı ayrıldı. 📊 *{count}/{challenge['team_size']}*")
+                except:
+                    pass
+
+            return {"success": True, "message": message}
+
+        except Exception as e:
+            logger.error(f"[X] leave_challenge hatası: {e}", exc_info=True)
+            return {"success": False, "message": "❌ Ayrılma işlemi sırasında bir hata oluştu."}
+
+    async def monitor_recruitment_timeouts(self):
+        """
+        Uzun süre recruiting aşamasında kalan challenge'ları otomatik iptal eder.
+        """
+        try:
+            # 7 günden eski recruiting challenge'ları bul
+            timeout_date = (datetime.now() - timedelta(days=7)).isoformat()
+            
+            recruiting_challenges = self.hub_repo.list(filters={"status": "recruiting"})
+            
+            cancelled_count = 0
+            for challenge in recruiting_challenges:
+                created_at = challenge.get("created_at")
+                if created_at and created_at < timeout_date:
+                    self.hub_repo.update(challenge["id"], {
+                        "status": "failed",
+                        "ended_at": datetime.now().isoformat()
+                    })
+                    cancelled_count += 1
+                    logger.info(f"[i] Challenge zaman aşımından dolayı iptal edildi: {challenge['id']}")
+                    
+                    hub_channel = challenge.get("hub_channel_id")
+                    if hub_channel:
+                        self.chat.post_message(
+                            channel=hub_channel,
+                            text=f"⏰ Bir challenge yeterli katılımcı sayısına ulaşamadığı için zaman aşımı nedeniyle iptal edildi."
+                        )
+            
+            if cancelled_count > 0:
+                logger.info(f"[+] Toplam {cancelled_count} challenge zaman aşımına uğratıldı.")
+                
+        except Exception as e:
+            logger.error(f"[X] recruitment_timeouts izleme hatası: {e}")
 
     async def request_finish_challenge(self, challenge_id: str, requester_id: str, channel_id: str) -> Dict[str, Any]:
         """
