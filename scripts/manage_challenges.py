@@ -566,7 +566,6 @@ def interactive_menu():
                     console.print("[red]Invalid selection![/red]")
                 input("\nPress Enter to continue...")
                 
-        elif choice == "5":
         elif choice == "6": # Corrected from duplicate '5'
             uid = input("Enter User Slack ID: ")
             if uid:
