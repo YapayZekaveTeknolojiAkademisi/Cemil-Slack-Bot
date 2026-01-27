@@ -120,6 +120,8 @@ class ChallengeEvaluationService:
                 
                 participant_count = len(participant_ids)
                 team_size = ch.get("team_size", 0)
+                # team_size creator hariç sayı, toplam = team_size + 1 (creator dahil)
+                total_team_size = team_size + 1
                 
                 # Slack profillerini linkle (ilk 3 kişi + sayı)
                 if participant_ids:
@@ -129,11 +131,11 @@ class ChallengeEvaluationService:
                     remaining = participant_count - len(shown_users)
                     
                     if remaining > 0:
-                        team_info = f"{user_mentions} +{remaining} ({participant_count}/{team_size})"
+                        team_info = f"{user_mentions} +{remaining} ({participant_count}/{total_team_size})"
                     else:
-                        team_info = f"{user_mentions} ({participant_count}/{team_size})"
+                        team_info = f"{user_mentions} ({participant_count}/{total_team_size})"
                 else:
-                    team_info = f"0/{team_size}"
+                    team_info = f"0/{total_team_size}"
                 
                 # GitHub durumu
                 github_info = "❌ Yok"
@@ -896,6 +898,13 @@ class ChallengeEvaluationService:
             )
 
             logger.info(f"[+] Oy kaydedildi: {user_id} | Vote: {vote} | Evaluation: {evaluation_id}")
+
+            # Canvas'ı güncelle (oy sayısı değişti)
+            try:
+                await self.update_challenge_canvas(evaluation.get("challenge_hub_id"))
+                logger.debug(f"[i] Canvas güncellendi (oy verildikten sonra): {user_id}")
+            except Exception as e:
+                logger.warning(f"[!] Oy sonrası canvas güncellenemedi: {e}")
 
             # 3 kişi oy verdiyse kontrol et
             total_votes = votes["true"] + votes["false"]
