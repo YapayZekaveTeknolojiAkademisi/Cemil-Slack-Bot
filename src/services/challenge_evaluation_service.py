@@ -43,116 +43,133 @@ class ChallengeEvaluationService:
         self.stats_repo = stats_repo
         self.cron = cron_client
 
-    async def update_challenge_canvas(self, challenge_id: str) -> None:
+    async def update_challenge_canvas(self, challenge_id: str = None) -> None:
         """
         Duyuru kanalındaki challenge özet/canvas mesajını günceller veya yoksa oluşturur.
-        - Challenge adı/tema
-        - Proje adı & açıklaması (varsa)
-        - Katılımcılar
-        - GitHub linki & public durumu (varsa)
-        - Challenge & değerlendirme durumu
+        Tüm aktif challenge'ları yatay tablo formatında gösterir.
+        Her challenge bir satır olarak eklenir.
+        
+        Args:
+            challenge_id: Belirli bir challenge için güncelleme (opsiyonel, None ise tüm aktif challenge'lar)
         """
         try:
-            challenge = self.hub_repo.get(challenge_id)
-            if not challenge:
-                logger.warning(f"[!] Canvas güncelleme: Challenge bulunamadı: {challenge_id}")
+            # Tüm aktif challenge'ları al
+            all_active_challenges = self.hub_repo.get_all_active()
+            
+            if not all_active_challenges:
+                logger.debug("[i] Aktif challenge yok, canvas güncellenmeyecek")
                 return
-
-            hub_channel_id = challenge.get("hub_channel_id")
+            
+            # İlk challenge'dan hub_channel_id'yi al (tüm challenge'lar aynı kanalda olmalı)
+            first_challenge = all_active_challenges[0]
+            hub_channel_id = first_challenge.get("hub_channel_id")
+            
             if not hub_channel_id:
-                # Duyuru kanalı yoksa yapacak bir şey yok
                 logger.warning(
-                    f"[!] Canvas güncelleme: hub_channel_id YOK, canvas oluşturulamıyor | "
-                    f"Challenge: {challenge_id[:8]}... | "
-                    f"Tema: {challenge.get('theme', 'N/A')} | "
-                    f"Status: {challenge.get('status', 'N/A')}"
+                    f"[!] Canvas güncelleme: hub_channel_id YOK | "
+                    f"Toplam aktif challenge: {len(all_active_challenges)}"
                 )
                 return
             
             logger.info(
                 f"[>] Canvas güncelleme başlıyor | "
-                f"Challenge: {challenge_id[:8]}... | "
-                f"Kanal: {hub_channel_id} | "
-                f"Mevcut summary_ts: {challenge.get('summary_message_ts', 'YOK')}"
+                f"Toplam aktif challenge: {len(all_active_challenges)} | "
+                f"Kanal: {hub_channel_id}"
             )
 
-            # İlgili değerlendirme (varsa)
-            evaluation = self.evaluation_repo.get_by_challenge(challenge_id)
-
-            github_url = None
-            github_public = False
-            eval_status = None
-            final_result = None
-            true_votes = 0
-            false_votes = 0
-
-            if evaluation:
-                github_url = evaluation.get("github_repo_url")
-                github_public = evaluation.get("github_repo_public", 0) == 1
-                eval_status = evaluation.get("status")
-                final_result = evaluation.get("final_result")
-                try:
-                    votes = self.evaluator_repo.get_votes(evaluation["id"])
-                    true_votes = votes.get("true", 0)
-                    false_votes = votes.get("false", 0)
-                except Exception:
-                    pass
-
-            # Katılımcılar
-            participants = self.participant_repo.get_team_members(challenge_id)
-            participant_ids = [p["user_id"] for p in participants]
-            creator_id = challenge.get("creator_id")
-            if creator_id and creator_id not in participant_ids:
-                participant_ids.insert(0, creator_id)
-
-            # Durum metni
-            challenge_status = challenge.get("status", "unknown")
-            status_label = "Bilinmiyor"
-            if challenge_status == "recruiting":
-                status_label = "Takım Toplanıyor"
-            elif challenge_status == "active":
-                status_label = "Geliştirme Aşaması"
-            elif challenge_status == "evaluating":
-                status_label = "Değerlendirme Aşaması"
-            elif challenge_status == "completed":
-                if final_result == "success":
-                    status_label = "Tamamlandı (Başarılı)"
-                elif final_result == "failed":
-                    status_label = "Tamamlandı (Başarısız)"
+            # Tüm aktif challenge'lar için veri topla
+            table_rows = []
+            
+            for ch in all_active_challenges:
+                ch_id = ch.get("id")
+                evaluation = self.evaluation_repo.get_by_challenge(ch_id)
+                
+                # Challenge bilgileri
+                theme = ch.get("theme", "N/A")
+                project_name = ch.get("project_name") or "Belirlenmedi"
+                status = ch.get("status", "unknown")
+                
+                # Durum etiketi
+                if status == "recruiting":
+                    status_label = "📋 Toplanıyor"
+                elif status == "active":
+                    status_label = "🚀 Geliştirme"
+                elif status == "evaluating":
+                    status_label = "⚖️ Değerlendirme"
+                elif status == "completed":
+                    final_result = evaluation.get("final_result") if evaluation else None
+                    status_label = "✅ Başarılı" if final_result == "success" else "❌ Başarısız"
                 else:
-                    status_label = "Tamamlandı"
-
-            # GitHub bilgisi
-            if github_url:
-                github_status = f"{'✅ Public' if github_public else '⚠️ Private'} - {github_url}"
-            else:
-                github_status = "Henüz eklenmedi (`/challenge set github <link>`)"
-
-            # Özet blokları oluştur
-            theme = challenge.get("theme", "Challenge")
-            project_name = challenge.get("project_name") or "Proje adı henüz belirlenmedi"
-            project_desc = challenge.get("project_description") or "Henüz açıklama bulunmuyor."
-
-            participants_text = (
-                ", ".join(f"<@{uid}>" for uid in participant_ids)
-                if participant_ids else "Henüz katılımcı yok."
-            )
-
-            deadline = challenge.get("deadline")
-            deadline_text = (
-                datetime.fromisoformat(deadline).strftime("%d.%m %H:%M")
-                if deadline else "Belirlenmedi"
-            )
-
-            header_text = f"📌 *{theme}* – *{project_name}*"
-
-            # Tablo formatında canvas mesajı
+                    status_label = "❓ Bilinmiyor"
+                
+                # Bitiş tarihi
+                deadline = ch.get("deadline")
+                deadline_text = (
+                    datetime.fromisoformat(deadline).strftime("%d.%m %H:%M")
+                    if deadline else "Belirlenmedi"
+                )
+                
+                # Katılımcı sayısı
+                participants = self.participant_repo.get_team_members(ch_id)
+                participant_count = len(participants)
+                team_size = ch.get("team_size", 0)
+                team_info = f"{participant_count}/{team_size}"
+                
+                # GitHub durumu
+                github_info = "❌ Yok"
+                if evaluation:
+                    github_url = evaluation.get("github_repo_url")
+                    if github_url:
+                        github_public = evaluation.get("github_repo_public", 0) == 1
+                        github_info = "✅ Public" if github_public else "⚠️ Private"
+                
+                # Oylar
+                votes_info = "-"
+                if evaluation:
+                    try:
+                        votes = self.evaluator_repo.get_votes(evaluation["id"])
+                        true_votes = votes.get("true", 0)
+                        false_votes = votes.get("false", 0)
+                        if true_votes > 0 or false_votes > 0:
+                            votes_info = f"✅{true_votes} ❌{false_votes}"
+                    except:
+                        pass
+                
+                # Tablo satırı ekle
+                table_rows.append({
+                    "theme": theme[:20],
+                    "project": project_name[:25],
+                    "status": status_label,
+                    "deadline": deadline_text,
+                    "team": team_info,
+                    "github": github_info,
+                    "votes": votes_info
+                })
+            
+            # Yatay tablo formatında canvas mesajı oluştur
+            # Slack'te monospace font için code block kullan
+            table_lines = [
+                "```",
+                f"{'Tema':<20} | {'Proje':<25} | {'Durum':<15} | {'Bitiş':<12} | {'Takım':<8} | {'GitHub':<12} | {'Oylar':<10}",
+                "-" * 120
+            ]
+            
+            for row in table_rows:
+                table_lines.append(
+                    f"{row['theme']:<20} | {row['project']:<25} | {row['status']:<15} | "
+                    f"{row['deadline']:<12} | {row['team']:<8} | {row['github']:<12} | {row['votes']:<10}"
+                )
+            
+            table_lines.append("```")
+            table_text = "\n".join(table_lines)
+            
+            # Canvas mesajı blocks
             blocks = [
                 {
                     "type": "header",
                     "text": {
                         "type": "plain_text",
-                        "text": f"{theme} – {project_name}",
+                        "text": "📊 Aktif Challenge'lar",
                         "emoji": True
                     }
                 },
@@ -161,77 +178,33 @@ class ChallengeEvaluationService:
                 },
                 {
                     "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*📊 Durum:*\n{status_label}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*⏰ Bitiş:*\n{deadline_text}"
-                        }
-                    ]
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*👥 Takım:*\n{participants_text[:150]}{'...' if len(participants_text) > 150 else ''}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*📝 Proje:*\n{project_desc[:100]}{'...' if len(project_desc) > 100 else ''}"
-                        }
-                    ]
-                },
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": table_text
+                    }
+                }
             ]
             
-            # GitHub bilgisi varsa ekle
-            if github_url:
-                blocks.append({
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*🔗 GitHub:*\n{github_status[:100]}{'...' if len(github_status) > 100 else ''}"
-                        }
-                    ]
-                })
-            
-            # Değerlendirme bilgisi varsa ekle
-            if evaluation:
-                eval_line = f"*📊 Değerlendirme:*\n{eval_status or 'bilinmiyor'} | Oylar: ✅{true_votes} ❌{false_votes}"
-                blocks.append({
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": eval_line
-                        }
-                    ]
-                })
-            
-            # Debug: Blocks yapısını logla
-            logger.debug(f"[DEBUG] Canvas blocks yapısı: {blocks}")
+            # İlk challenge'dan summary_ts al (tüm challenge'lar aynı canvas mesajını kullanır)
+            summary_ts = first_challenge.get("summary_message_ts")
 
-            summary_ts = challenge.get("summary_message_ts")
-
+            # Canvas mesajı için text fallback
+            canvas_text = f"📊 Aktif Challenge'lar ({len(all_active_challenges)} adet)\n{table_text}"
+            
             # Mevcut mesajı güncelle veya yeni mesaj oluştur
             if summary_ts:
                 try:
                     self.chat.update_message(
                         channel=hub_channel_id,
                         ts=summary_ts,
-                        text=header_text,
+                        text=canvas_text,
                         blocks=blocks,
                     )
                     logger.info(
-                        f"[+] Challenge canvas/özet mesajı GÜNCELLENDİ | "
-                        f"Challenge: {challenge_id[:8]}... | "
+                        f"[+] Canvas tablo GÜNCELLENDİ | "
                         f"Kanal: {hub_channel_id} | "
                         f"TS: {summary_ts} | "
-                        f"Durum: {status_label}"
+                        f"Toplam challenge: {len(all_active_challenges)}"
                     )
                     return
                 except Exception as e:
@@ -239,18 +212,10 @@ class ChallengeEvaluationService:
 
             # Yeni mesaj oluştur
             try:
-                # Canvas mesajı için text fallback (blocks render edilemezse gösterilir)
-                canvas_text = (
-                    f"{header_text}\n"
-                    f"Durum: {status_label}\n"
-                    f"Bitiş: {deadline_text}\n"
-                    f"Takım: {participants_text[:100]}"
-                )
-                
                 logger.debug(
-                    f"[DEBUG] Canvas mesajı gönderiliyor | "
+                    f"[DEBUG] Canvas tablo mesajı gönderiliyor | "
                     f"Kanal: {hub_channel_id} | "
-                    f"Text: {canvas_text[:100]}... | "
+                    f"Toplam challenge: {len(all_active_challenges)} | "
                     f"Blocks sayısı: {len(blocks)}"
                 )
                 
@@ -267,21 +232,21 @@ class ChallengeEvaluationService:
                 message_data = resp.get("message", {})
                 
                 if ts:
-                    self.hub_repo.update(
-                        challenge_id,
-                        {
-                            "summary_message_ts": ts,
-                            "summary_message_channel_id": hub_channel_id,
-                        },
-                    )
+                    # Tüm aktif challenge'lara aynı summary_ts'yi kaydet
+                    for ch in all_active_challenges:
+                        self.hub_repo.update(
+                            ch.get("id"),
+                            {
+                                "summary_message_ts": ts,
+                                "summary_message_channel_id": hub_channel_id,
+                            },
+                        )
                     logger.info(
-                        f"[+] Challenge için YENİ canvas/özet mesajı OLUŞTURULDU | "
-                        f"Challenge: {challenge_id[:8]}... | "
+                        f"[+] YENİ canvas tablo mesajı OLUŞTURULDU | "
                         f"Kanal: {hub_channel_id} | "
                         f"TS: {ts} | "
-                        f"Başlık: {header_text[:50]}... | "
-                        f"Message Type: {message_data.get('type', 'N/A')} | "
-                        f"Subtype: {message_data.get('subtype', 'N/A')}"
+                        f"Toplam challenge: {len(all_active_challenges)} | "
+                        f"Message Type: {message_data.get('type', 'N/A')}"
                     )
                     
                     # Mesajın Slack'te gerçekten var olup olmadığını kontrol et
@@ -301,8 +266,8 @@ class ChallengeEvaluationService:
                 else:
                     logger.error(
                         f"[X] Canvas mesajı gönderildi ama TS alınamadı! | "
-                        f"Challenge: {challenge_id[:8]}... | "
                         f"Kanal: {hub_channel_id} | "
+                        f"Toplam challenge: {len(all_active_challenges)} | "
                         f"Response OK: {resp.get('ok', False)} | "
                         f"Response: {str(resp)[:300]}"
                     )
