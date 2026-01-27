@@ -46,7 +46,7 @@ logs/
 *.log
 
 # Scripts
-scripts/
+# scripts/ (removed from ignore)
 
 # Data
 data/
