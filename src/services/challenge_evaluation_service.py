@@ -358,6 +358,13 @@ class ChallengeEvaluationService:
                     "is_full": (current_count >= 3)
                 }
 
+        except Exception as e:
+            logger.error(f"[X] toggle_juror hatası: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": "❌ İşlem sırasında bir hata oluştu."
+            }
+
     async def submit_vote(
         self,
         evaluation_id: str,
