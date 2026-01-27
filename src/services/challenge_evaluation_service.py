@@ -1018,15 +1018,38 @@ class ChallengeEvaluationService:
     ) -> Dict[str, Any]:
         """
         Admin onayı ile değerlendirmeyi sonlandırır.
-        Sadece admin çağırabilir.
+        Sadece admin (admin_slack_id) veya workspace owner çağırabilir.
         """
         try:
             settings = get_settings()
             ADMIN_USER_ID = settings.admin_slack_id
-            if admin_user_id != ADMIN_USER_ID:
+            
+            # Admin kontrolü: admin_slack_id veya workspace owner
+            is_admin = False
+            if ADMIN_USER_ID and admin_user_id == ADMIN_USER_ID:
+                is_admin = True
+                logger.debug(f"[i] Admin kontrolü: admin_slack_id eşleşti | User: {admin_user_id}")
+            else:
+                # Slack API'den workspace owner kontrolü yap
+                try:
+                    # self.chat içindeki client'ı kullan
+                    if hasattr(self.chat, 'client'):
+                        user_info = self.chat.client.users_info(user=admin_user_id)
+                        if user_info.get("ok"):
+                            user = user_info.get("user", {})
+                            is_owner = user.get("is_owner", False)
+                            is_admin_flag = user.get("is_admin", False)
+                            is_admin = is_owner or is_admin_flag
+                            if is_admin:
+                                logger.info(f"[i] Admin kontrolü: Workspace owner/admin tespit edildi | User: {admin_user_id} | Owner: {is_owner}, Admin: {is_admin_flag}")
+                except Exception as e:
+                    logger.warning(f"[!] Workspace owner kontrolü yapılamadı: {e}")
+            
+            if not is_admin:
+                logger.warning(f"[!] Admin yetkisi reddedildi | User: {admin_user_id} | Admin ID: {ADMIN_USER_ID}")
                 return {
                     "success": False,
-                    "message": "❌ Sadece admin bu işlemi yapabilir."
+                    "message": "❌ Sadece admin (workspace owner) bu işlemi yapabilir."
                 }
             
             evaluation = self.evaluation_repo.get(evaluation_id)
