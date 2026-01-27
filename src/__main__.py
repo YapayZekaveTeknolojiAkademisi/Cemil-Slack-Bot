@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 def ensure_database_schema():
     """
     Veritabanı şemasının güncel olduğundan emin olur.
-    Eksik kolonları otomatik ekler.
+    Eksik kolonları otomatik ekler, gereksiz kolonları temizler.
     """
     try:
         logger.info("[>] Veritabanı şema kontrolü yapılıyor...")
@@ -32,7 +32,7 @@ def ensure_database_schema():
         cursor.execute("PRAGMA table_info(challenge_hubs)")
         cols = {row["name"] for row in cursor.fetchall()}
         
-        # Gerekli yeni kolonlar
+        # Gerekli yeni kolonlar - eksikse ekle
         migrations = []
         if "project_name" not in cols:
             migrations.append("ALTER TABLE challenge_hubs ADD COLUMN project_name TEXT;")
@@ -45,11 +45,74 @@ def ensure_database_schema():
         if "ended_at" not in cols:
             migrations.append("ALTER TABLE challenge_hubs ADD COLUMN ended_at TIMESTAMP;")
         
+        # Gereksiz kolonları temizle (canvas_id - kodda kullanılmıyor, summary_message_ts kullanılıyor)
+        if "canvas_id" in cols:
+            logger.info("[i] Gereksiz canvas_id kolonu tespit edildi (summary_message_ts kullanılıyor). Kaldırılıyor...")
+            try:
+                # SQLite'da kolon kaldırmak için tabloyu yeniden oluşturmak gerekir
+                # Önce mevcut verileri yedekle
+                cursor.execute("SELECT * FROM challenge_hubs")
+                rows = cursor.fetchall()
+                col_names = [desc[0] for desc in cursor.description]
+                
+                # canvas_id hariç kolonları al
+                new_cols = [col for col in col_names if col != "canvas_id"]
+                new_cols_str = ", ".join(new_cols)
+                
+                # Yeni tablo oluştur (canvas_id olmadan)
+                cursor.execute("""
+                    CREATE TABLE challenge_hubs_new (
+                        id TEXT PRIMARY KEY,
+                        creator_id TEXT NOT NULL,
+                        theme TEXT NOT NULL,
+                        team_size INTEGER NOT NULL,
+                        status TEXT DEFAULT 'recruiting',
+                        challenge_channel_id TEXT,
+                        hub_channel_id TEXT,
+                        selected_project_id TEXT,
+                        llm_customizations TEXT,
+                        deadline_hours INTEGER DEFAULT 48,
+                        difficulty TEXT DEFAULT 'intermediate',
+                        deadline TIMESTAMP,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        project_name TEXT,
+                        project_description TEXT,
+                        summary_message_ts TEXT,
+                        summary_message_channel_id TEXT,
+                        ended_at TIMESTAMP,
+                        FOREIGN KEY (creator_id) REFERENCES users(slack_id) ON DELETE CASCADE
+                    )
+                """)
+                
+                # Verileri kopyala (canvas_id hariç)
+                if rows:
+                    placeholders = ", ".join(["?"] * len(new_cols))
+                    for row in rows:
+                        row_dict = dict(zip(col_names, row))
+                        values = [row_dict[col] for col in new_cols]
+                        cursor.execute(f"INSERT INTO challenge_hubs_new ({new_cols_str}) VALUES ({placeholders})", values)
+                
+                # Eski tabloyu sil ve yenisini yeniden adlandır
+                cursor.execute("DROP TABLE challenge_hubs")
+                cursor.execute("ALTER TABLE challenge_hubs_new RENAME TO challenge_hubs")
+                
+                # Index'leri yeniden oluştur
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_challenge_hubs_status ON challenge_hubs(status)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_challenge_hubs_creator ON challenge_hubs(creator_id)")
+                
+                logger.info("[+] Gereksiz canvas_id kolonu kaldırıldı.")
+            except Exception as e:
+                logger.warning(f"[!] canvas_id kolonu kaldırılırken hata (devam ediliyor): {e}")
+        
+        # Eksik kolonları ekle
         for migration in migrations:
             cursor.execute(migration)
             logger.info(f"[+] Şema güncellendi: {migration.split('ADD COLUMN')[1].strip()}")
         
-        if migrations:
+        if migrations or "canvas_id" in cols:
             conn.commit()
             logger.info("[+] Veritabanı şeması güncellendi.")
         else:

@@ -69,7 +69,7 @@ class ChallengeManager:
             cursor.execute("PRAGMA table_info(challenge_hubs)")
             cols = {row["name"] for row in cursor.fetchall()}
 
-            # Beklenen yeni kolonlar
+            # Beklenen yeni kolonlar - eksikse ekle
             alter_statements = []
             if "project_name" not in cols:
                 alter_statements.append("ALTER TABLE challenge_hubs ADD COLUMN project_name TEXT;")
@@ -79,6 +79,8 @@ class ChallengeManager:
                 alter_statements.append("ALTER TABLE challenge_hubs ADD COLUMN summary_message_ts TEXT;")
             if "summary_message_channel_id" not in cols:
                 alter_statements.append("ALTER TABLE challenge_hubs ADD COLUMN summary_message_channel_id TEXT;")
+            if "ended_at" not in cols:
+                alter_statements.append("ALTER TABLE challenge_hubs ADD COLUMN ended_at TIMESTAMP;")
 
             for stmt in alter_statements:
                 cursor.execute(stmt)
@@ -86,6 +88,11 @@ class ChallengeManager:
             if alter_statements:
                 conn.commit()
                 console.print("[green]✅ challenge_hubs şeması otomatik olarak güncellendi.[/green]")
+            
+            # Gereksiz kolon kontrolü (canvas_id - kodda kullanılmıyor)
+            if "canvas_id" in cols:
+                console.print("[yellow]⚠️ Gereksiz canvas_id kolonu tespit edildi (summary_message_ts kullanılıyor).[/yellow]")
+                console.print("[yellow]   Bu kolon __main__.py'deki ensure_database_schema() tarafından otomatik temizlenecektir.[/yellow]")
         except Exception as e:
             console.print(f"[bold red]⚠️ Şema kontrolü sırasında hata: {e}[/bold red]")
         finally:

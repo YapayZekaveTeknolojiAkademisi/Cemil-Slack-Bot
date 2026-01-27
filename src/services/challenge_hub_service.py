@@ -96,8 +96,52 @@ class ChallengeHubService:
                     logger.warning(f"[!] Kullanıcı kontrolü/ekleme hatası: {e}")
                     # Hata olsa bile devam et, belki kullanıcı zaten var
             
-            # 1. Aktif challenge kontrolü kaldırıldı - kullanıcılar istediği kadar challenge açabilir
+            # 1. Kullanıcının aktif challenge'ı var mı? (Katılımcı VEYA creator olarak)
+            # Bir kişi sadece tek bir aktif challenge'da bulunabilir!
+            active_challenges = []
             
+            # A) Katılımcı olarak aktif challenge'ları kontrol et
+            try:
+                participant_challenges = self.participant_repo.get_user_active_challenges(creator_id)
+                if participant_challenges:
+                    active_challenges.extend(participant_challenges)
+            except Exception as e:
+                logger.warning(f"[!] Participant challenge kontrolü hatası: {e}")
+            
+            # B) Creator olarak aktif challenge'ları kontrol et
+            try:
+                if self.db_client:
+                    with self.db_client.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT * FROM challenge_hubs
+                            WHERE creator_id = ? AND status IN ('recruiting', 'active')
+                        """, (creator_id,))
+                        rows = cursor.fetchall()
+                        creator_challenges = [dict(row) for row in rows]
+                        if creator_challenges:
+                            active_challenges.extend(creator_challenges)
+            except Exception as e:
+                logger.warning(f"[!] Creator challenge kontrolü hatası: {e}")
+            
+            # Eğer herhangi bir aktif challenge varsa (katılımcı veya creator), yeni challenge açamaz
+            if active_challenges:
+                challenge_info = active_challenges[0]
+                challenge_status = challenge_info.get('status', 'unknown')
+                challenge_id = challenge_info.get('id', 'unknown')[:8]
+                
+                return {
+                    "success": False,
+                    "message": (
+                        f"❌ *Zaten Aktif Bir Challenge'ınız Var!*\n\n"
+                        f"📊 *Durum:* {challenge_status.upper()}\n"
+                        f"🆔 *Challenge ID:* `{challenge_id}...`\n\n"
+                        f"💡 *Not:* Bir kişi aynı anda sadece tek bir aktif challenge'da bulunabilir.\n"
+                        f"Mevcut challenge'ınızı tamamladıktan sonra yeni bir challenge başlatabilirsiniz."
+                    ),
+                    "error_code": "USER_HAS_ACTIVE_CHALLENGE"
+                }
+
             # 2. Challenge hub oluştur (tema ve süre henüz belirlenmedi)
             challenge_id = str(uuid.uuid4())
 
@@ -302,7 +346,54 @@ class ChallengeHubService:
                     "error_code": "TEAM_FULL"
                 }
 
-            # 6. Aktif challenge kontrolü kaldırıldı - kullanıcılar istediği kadar challenge'a katılabilir
+            # 6. Kullanıcının başka aktif challenge'ı var mı? (Katılımcı VEYA creator olarak)
+            # Bir kişi sadece tek bir aktif challenge'da bulunabilir!
+            active_challenges = []
+            
+            # A) Katılımcı olarak aktif challenge'ları kontrol et (mevcut challenge hariç)
+            try:
+                participant_challenges = self.participant_repo.get_user_active_challenges(user_id)
+                if participant_challenges:
+                    # Mevcut challenge'a katılmaya çalışıyor, onu hariç tut
+                    other_challenges = [c for c in participant_challenges if c.get("id") != challenge_id]
+                    if other_challenges:
+                        active_challenges.extend(other_challenges)
+            except Exception as e:
+                logger.warning(f"[!] Participant challenge kontrolü hatası: {e}")
+            
+            # B) Creator olarak aktif challenge'ları kontrol et
+            try:
+                if self.db_client:
+                    with self.db_client.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT * FROM challenge_hubs
+                            WHERE creator_id = ? AND status IN ('recruiting', 'active')
+                        """, (user_id,))
+                        rows = cursor.fetchall()
+                        creator_challenges = [dict(row) for row in rows]
+                        if creator_challenges:
+                            active_challenges.extend(creator_challenges)
+            except Exception as e:
+                logger.warning(f"[!] Creator challenge kontrolü hatası: {e}")
+            
+            # Eğer herhangi bir aktif challenge varsa (katılımcı veya creator), yeni challenge'a katılamaz
+            if active_challenges:
+                challenge_info = active_challenges[0]
+                challenge_status = challenge_info.get('status', 'unknown')
+                other_challenge_id = challenge_info.get('id', 'unknown')[:8]
+                
+                return {
+                    "success": False,
+                    "message": (
+                        f"❌ *Zaten Aktif Bir Challenge'ınız Var!*\n\n"
+                        f"📊 *Durum:* {challenge_status.upper()}\n"
+                        f"🆔 *Challenge ID:* `{other_challenge_id}...`\n\n"
+                        f"💡 *Not:* Bir kişi aynı anda sadece tek bir aktif challenge'da bulunabilir.\n"
+                        f"Mevcut challenge'ınızı tamamladıktan sonra başka bir challenge'a katılabilirsiniz."
+                    ),
+                    "error_code": "USER_HAS_ACTIVE_CHALLENGE"
+                }
 
             # 7. Katılımcı ekle
             self.participant_repo.create({
