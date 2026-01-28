@@ -63,6 +63,7 @@ from src.services import (
 
 # --- Handlers ---
 from src.handlers import (
+    setup_daily_handlers,
     setup_coffee_handlers,
     setup_poll_handlers,
     setup_feedback_handlers,
@@ -193,6 +194,7 @@ logger.info("[+] Servisler hazır.")
 # ============================================================================
 
 logger.info("[i] Handler'lar kaydediliyor...")
+setup_daily_handlers(app, groq_client, chat_manager)
 setup_coffee_handlers(app, coffee_service, chat_manager, user_repo)
 setup_poll_handlers(app, voting_service, chat_manager, user_repo)
 setup_feedback_handlers(app, feedback_service, chat_manager, user_repo)

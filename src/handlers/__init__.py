@@ -2,6 +2,7 @@
 Command handler'ları için modül.
 """
 
+from .daily_handler import setup_daily_handlers
 from .coffee_handler import setup_coffee_handlers
 from .poll_handler import setup_poll_handlers
 from .feedback_handler import setup_feedback_handlers
@@ -14,6 +15,7 @@ from .challenge_handler import setup_challenge_handlers
 from .challenge_evaluation_handler import setup_challenge_evaluation_handlers
 
 __all__ = [
+    'setup_daily_handlers',
     'setup_coffee_handlers',
     'setup_poll_handlers',
     'setup_feedback_handlers',

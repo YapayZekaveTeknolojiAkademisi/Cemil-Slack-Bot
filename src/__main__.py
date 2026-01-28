@@ -406,116 +406,113 @@ def main():
                     startup_text += f"• <{github_repo}/blob/main/CONTRIBUTING.md|Katkıda Bulun>"
                 
                 startup_blocks = [
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "👋 Merhabalar! Ben Cemil, Yapay Zeka Akademisi'nin yardımcı asistanıyım!",
-                            "emoji": True
-                        }
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": "Topluluk etkileşimini artırmak, öğrenmeyi desteklemek ve işlerinizi kolaylaştırmak için buradayım. Aşağıda tüm özelliklerim ve nasıl kullanılacağı detaylıca açıklanmıştır."
-                        }
-                    },
-                    {"type": "divider"},
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "🎯 Ana Özellikler",
-                            "emoji": True
-                        }
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "*☕ Kahve Eşleşmesi*\n*Komut:* `/kahve`\n*Kullanım:* Komutu çalıştırın, başka biri de kahve isterse otomatik eşleşirsiniz.\n*Sonuç:* Özel kanal açılır, 5 dakika sohbet, sonra özet DM'inize gelir."
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": "*🆘 Yardım Sistemi*\n*Komut:* `/yardim-iste <konu> <açıklama>`\n*Kullanım:* Yardıma ihtiyacınız olduğunda komutu kullanın.\n*Sonuç:* Yardım kanalı açılır, topluluk katılır, 10 dakika sonra özet gönderilir."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "*🚀 Challenge Hub*\n*Komut:* `/challenge start <takım>`\n*Kullanım:* Challenge başlatın, diğerleri butona tıklayarak katılır.\n*Değerlendirme:* `/challenge set True/False` - Oy verin, `/challenge set github <link>` - Repo ekleyin\n*Sonuç:* Random proje seçilir, özel kanal açılır, LLM özelleştirilmiş görevler eklenir."
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": "*🧠 Bilgi Küpü (RAG)*\n*Komut:* `/sor <soru>`\n*Kullanım:* Akademi dökümanları hakkında soru sorun.\n*Sonuç:* PDF'lerden bilgi bulunur, Türkçe cevap verilir."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "*🗳️ Oylama* (Admin)\n*Komut:* `/oylama <konu> <seçenekler>`\n*Kullanım:* Admin olarak anket başlatın.\n*Sonuç:* Herkes oy verir, sonuçlar otomatik hesaplanır."
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": "*📝 Geri Bildirim*\n*Komut:* `/geri-bildirim <mesaj>`\n*Kullanım:* Anonim fikir/öneri gönderin.\n*Sonuç:* Admin kanalına anonim iletilir."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "*👤 Profil*\n*Komut:* `/profilim`\n*Kullanım:* Kayıtlı bilgilerinizi görüntüleyin."
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": "*📊 Admin İstatistik* (Admin)\n*Komut:* `/admin-istatistik` - Bot istatistikleri\n*Komut:* `/admin-basarili-projeler` - Başarılı projeler, ekipler ve GitHub linkleri"
-                            }
-                        ]
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": "*🏥 Bot Sağlık*\n*Komut:* `/cemil-health` - Bot'un çalışma durumunu kontrol edin."
-                        }
-                    },
-                    {"type": "divider"},
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": "*💡 İpuçları:*\n• Challenge'lar takım çalışması ve öğrenme odaklıdır\n• Yardım ve kahve kanalları otomatik kapanır, özetler DM'inize gelir\n• Bilgi küpü sadece Türkçe cevap verir\n• Tüm komutlar için yardım yakında eklenecek"
-                        }
-                    },
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "Güzel bir gün dilerim! ✨ <!channel>"
-                            }
-                        ]
-                    },
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": "🔊 <https://www.myinstants.com/instant/cemil-olabilir-mi-cemil-60667/|Cemil olabilir mi? Cemil>"
-                            }
-                        ]
-                    }
-                ]
+                                    {
+                                        "type": "header",
+                                        "text": {
+                                            "type": "plain_text",
+                                            "text": "👋 Merhabalar! Ben Cemil, Yapay Zeka Akademisi'nin yardımcı asistanıyım!",
+                                            "emoji": True
+                                        }
+                                    },
+                                    {
+                                        "type": "section",
+                                        "text": {
+                                            "type": "mrkdwn",
+                                            "text": "Topluluk etkileşimini artırmak, öğrenmeyi desteklemek ve işlerinizi kolaylaştırmak için buradayım. Aşağıda tüm özelliklerim ve nasıl kullanılacağı detaylıca açıklanmıştır."
+                                        }
+                                    },
+                                    {"type": "divider"},
+                                    {
+                                        "type": "header",
+                                        "text": {
+                                            "type": "plain_text",
+                                            "text": "🎯 Ana Özellikler",
+                                            "emoji": True
+                                        }
+                                    },
+                                    {
+                                        "type": "section",
+                                        "fields": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*☕ Kahve Eşleşmesi*\n*Komut:* `/kahve`\n*Kullanım:* Komutu çalıştırın, başka biri de kahve isterse otomatik eşleşirsiniz."
+                                            },
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*🆘 Yardım Sistemi*\n*Komut:* `/yardim-iste <konu> <açıklama>`\n*Kullanım:* Yardıma ihtiyacınız olduğunda komutu kullanın."
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "section",
+                                        "fields": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*🚀 Challenge Hub*\n*Komut:* `/challenge start <takım>`\n*Kullanım:* Challenge başlatın, diğerleri katılır."
+                                            },
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*🧠 Bilgi Küpü (RAG)*\n*Komut:* `/sor <soru>`\n*Kullanım:* Akademi dökümanları hakkında soru sorun."
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "section",
+                                        "fields": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*🗳️ Oylama* (Admin)\n*Komut:* `/oylama <konu> <seçenekler>`\n*Kullanım:* Admin olarak anket başlatın."
+                                            },
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*📝 Geri Bildirim*\n*Komut:* `/geri-bildirim <mesaj>`\n*Kullanım:* Anonim fikir/öneri gönderin."
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "section",
+                                        "fields": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*👤 Profil*\n*Komut:* `/profilim`\n*Kullanım:* Kayıtlı bilgilerinizi görüntüleyin."
+                                            },
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*📊 Admin İstatistik*\n*Komut:* `/admin-istatistik` | `/admin-basarili-projeler`"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "section",
+                                        "fields": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*📅 Günlük Pratik & Motivasyon*\n*Komut:* `/daily english` | `/daily motivasyon`\n*Kullanım:* İngilizce pratik veya motivasyon mesajı alırsınız."
+                                            },
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "*🏥 Bot Sağlık*\n*Komut:* `/cemil-health`\n*Kullanım:* Bot'un çalışma durumunu kontrol edin."
+                                            }
+                                        ]
+                                    },
+                                    {"type": "divider"},
+                                    {
+                                        "type": "section",
+                                        "text": {
+                                            "type": "mrkdwn",
+                                            "text": "*💡 İpuçları:*\n• Challenge'lar takım çalışması odaklıdır\n• Yardım ve kahve kanalları otomatik kapanır\n• Bilgi küpü sadece Türkçe cevap verir"
+                                        }
+                                    },
+                                    {
+                                        "type": "context",
+                                        "elements": [
+                                            {
+                                                "type": "mrkdwn",
+                                                "text": "Güzel bir gün dilerim! ✨ <!channel>"
+                                            }
+                                        ]
+                                    }
+                                ]
 
                 chat_manager.post_message(
                     channel=startup_channel,
